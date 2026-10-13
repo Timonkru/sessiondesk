@@ -5,9 +5,6 @@ Status 13 Oct 2026: v0.1 - all pages working on free data, 43 offline tests gree
 
 ## Verify what exists
 
-- [ ] Activate CI: move `ci/tests.yml` to `.github/workflows/tests.yml` (the GitHub web editor can do it,
-      or locally after `gh auth refresh -s workflow` - the current CLI token lacks the workflow scope).
-
 - [ ] Run each keyed connector once with a real key (Finnhub, FMP, Polygon, Alpha Vantage,
       Trading Economics, Alpaca) and flip `verified = True` only after it worked.
 - [ ] First real AI call per provider (Anthropic SDK path incl. `fallbacks="default"`, OpenAI,
