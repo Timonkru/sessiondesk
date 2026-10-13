@@ -431,7 +431,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
 
     @app.get("/favicon.ico")
     async def favicon():
-        return Response(status_code=204)
+        return Response((STATIC / "sessiondesk.ico").read_bytes(), media_type="image/x-icon")
 
     return app
 

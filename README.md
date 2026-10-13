@@ -45,7 +45,15 @@ pip install -e .
 sessiondesk
 ```
 
-Your browser opens at <http://127.0.0.1:8765>. Options: `--port 9000`, `--no-browser`.
+Your browser opens at <http://127.0.0.1:8765>. Options: `--port 9000`, `--no-browser`, `--app` (own
+window without browser bars). Starting it again while it runs simply reopens the window.
+
+Windows desktop shortcut (starts minimized in the background, opens the app window; close the
+minimized console to stop it):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\windows_shortcut.ps1
+```
 Settings, keys, cache, the news archive and job logs live in `~/.sessiondesk/` (override with
 `SESSIONDESK_HOME`).
 
