@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="sd-token" content="{{TOKEN}}">
+<meta name="sd-version" content="{{VERSION}}">
+<title>SessionDesk</title>
+<link rel="stylesheet" href="/static/app.css?v={{VERSION}}">
+</head>
+<body>
+<div id="app">
+  <nav id="nav" aria-label="Main">
+    <a class="brand" href="#/">SessionDesk</a>
+    <a href="#/" data-route="overview">Markets</a>
+    <a href="#/watch" data-route="watch">Watchlist &amp; movers</a>
+    <a href="#/news" data-route="news">News</a>
+    <a href="#/calendar" data-route="calendar">Calendar</a>
+    <a href="#/flows" data-route="flows">Forced flows</a>
+    <a href="#/research" data-route="research">Research</a>
+    <a href="#/macro" data-route="macro">Macro</a>
+    <a href="#/broker" data-route="broker">Accounts &amp; EAs</a>
+    <a href="#/jobs" data-route="jobs">Jobs</a>
+    <span class="spacer"></span>
+    <a href="#/settings" data-route="settings">Settings</a>
+    <a href="#/help" data-route="help">Help</a>
+    <div class="navfoot"><span id="conn">connecting…</span> · <button id="theme" class="linkish" type="button">theme</button></div>
+  </nav>
+  <div id="main">
+    <header id="top">
+      <button id="menu" class="linkish" type="button" aria-label="Menu">Menu</button>
+      <div id="cmd">
+        <input id="cmdInput" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Search a stock, or ask a question about this page   ( / )">
+        <div id="cmdList" hidden></div>
+      </div>
+      <div id="eventStrip" title="Next high-impact release"></div>
+      <button id="aiToggle" type="button">Ask AI</button>
+    </header>
+    <div id="releaseBar" hidden></div>
+    <main id="view"></main>
+  </div>
+  <aside id="ai" hidden aria-label="AI assistant">
+    <div class="ai-head">
+      <strong>AI assistant</strong>
+      <span id="aiCtx" class="muted"></span>
+      <button id="aiClear" class="linkish" type="button">clear</button>
+      <button id="aiClose" class="linkish" type="button">close</button>
+    </div>
+    <div id="aiLog"></div>
+    <form id="aiForm">
+      <textarea id="aiInput" rows="3" placeholder="Ask about what you see on this page…"></textarea>
+      <div class="ai-foot"><span id="aiMeta" class="muted"></span><button type="submit">Send</button></div>
+    </form>
+  </aside>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<script type="module" src="/static/app.js?v={{VERSION}}"></script>
+</body>
+</html>

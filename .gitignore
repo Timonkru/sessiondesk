@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+
+# Local data, keys and private extensions never go into the repo
+.env
+.env.*
+!.env.example
+.sessiondesk/
+/data/
+secrets.json
+extensions/
+*.sqlite3
+*.db
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# MetaTrader build output
+bridge/*.ex5
+
+# local tool config
+.claude/

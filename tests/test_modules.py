@@ -1,0 +1,125 @@
+"""Jobs schedule/commands/imports, MT5 bridge files, research reader, AI prompt building."""
+from __future__ import annotations
+
+import datetime as dt
+import json
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from sessiondesk.ai import assist
+from sessiondesk.connectors.mt5 import MT5Bridge, read_tsv
+from sessiondesk.features import jobs, research
+
+
+# ------------------------------------------------------------------ jobs
+def test_next_run_daily_and_interval():
+    now = dt.datetime(2026, 10, 12, 8, 0).timestamp()           # Monday 08:00 local
+    due = jobs.next_run({"daily": "08:40", "weekdays": [0, 1, 2, 3, 4]}, now)
+    assert dt.datetime.fromtimestamp(due) == dt.datetime(2026, 10, 12, 8, 40)
+    after = jobs.next_run({"daily": "08:40", "weekdays": [0, 1, 2, 3, 4]}, now + 3600, last=due)
+    assert dt.datetime.fromtimestamp(after) == dt.datetime(2026, 10, 13, 8, 40)
+    sat = dt.datetime(2026, 10, 17, 9, 0).timestamp()
+    assert dt.datetime.fromtimestamp(jobs.next_run({"daily": "08:40", "weekdays": [0, 1, 2, 3, 4]}, sat)).weekday() == 0
+    assert jobs.next_run({"every_minutes": 30}, now, last=now - 600) == pytest.approx(now + 1200)
+
+
+def _job(cmd, python=None):
+    return jobs.Job(id="x", name="x", group="", cwd=Path("."), cmd=cmd, source="t", editable=True, python=python)
+
+
+def test_build_command_wraps_script_types():
+    assert jobs.build_command(_job("echo hi")) == ("echo hi", True)
+    assert jobs.build_command(_job(["python", "a.py"], python="C:/venv/python.exe"))[0][:2] == ["C:/venv/python.exe", "-u"]
+    assert jobs.build_command(_job(["run.ps1"]))[0][0] == "powershell"
+    if sys.platform.startswith("win"):
+        assert jobs.build_command(_job(["routine.bat", "--eu"]))[0][:3] == ["cmd", "/c", "routine.bat"]
+
+
+def test_imported_job_file_is_read_only_and_resolves_workspace(tmp_path):
+    ext = tmp_path / "other" / "jobs.json"
+    ext.parent.mkdir()
+    (tmp_path / "proj").mkdir()
+    ext.write_text(json.dumps({"workspace": "..", "python": "py.exe",
+                               "jobs": [{"id": "lvl", "name": "Levels", "cwd": "proj", "cmd": ["python", "b.py"], "clipboard": "out.txt"}],
+                               "workflows": [{"name": "Morning", "steps": ["lvl"]}],
+                               "artifacts": [{"group": "Pine", "label": "Gamma", "path": "proj/g.pine"}]}), encoding="utf-8")
+    (tmp_path / "proj" / "g.pine").write_text("//@version=6", encoding="utf-8")
+    settings = SimpleNamespace(get=lambda key, default=None: [str(ext)] if key == "jobs_files" else default)
+    ctx = SimpleNamespace(settings=settings, data_dir=tmp_path, broker=SimpleNamespace(publish=lambda *a, **k: None))
+    jm = jobs.JobManager(ctx)
+    job = jm.jobs["lvl"]
+    assert not job.editable and job.cwd == (tmp_path / "proj").resolve() and job.python == "py.exe"
+    assert jm.workflows[0]["name"] == "Morning"
+    arts = jm.list_artifacts()
+    assert any(a["label"] == "Gamma" and a["exists"] for a in arts)
+    assert jm.artifact_allowed(str(tmp_path / "proj" / "g.pine"))
+    assert not jm.artifact_allowed(str(tmp_path / "secret.txt"))
+    assert "read-only" in jm.upsert({"id": "lvl", "cmd": "echo"})["error"]
+
+
+# ------------------------------------------------------------------ MT5 bridge
+def _write(folder: Path, name: str, kind: str, cols: list[str], rows: list[list[str]], age: float = 0):
+    head = f"#sessiondesk\t1.00\t{kind}\t{int(time.time() - age)}\t10800\t52000123\n"
+    folder.joinpath(name).write_text(head + "\t".join(cols) + "\n" + "".join("\t".join(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def test_bridge_files_are_read_and_masked(tmp_path):
+    _write(tmp_path, "account_52000123.tsv", "account",
+           ["login", "server", "company", "currency", "balance", "equity", "margin", "free_margin", "profit", "leverage", "trade_allowed", "connected"],
+           [["52000123", "Demo-Server", "Broker", "EUR", "10000", "9900", "100", "9800", "-100", "100", "1", "1"]])
+    _write(tmp_path, "positions_52000123.tsv", "positions",
+           ["ticket", "symbol", "side", "volume", "open_price", "open_time_utc", "sl", "tp", "price", "profit", "swap", "magic", "comment", "risk_to_stop", "digits"],
+           [["1", "GER40", "LONG", "1.00", "24000", "1", "23950", "0", "23990", "-10", "0", "202507", "", "50", "1"]])
+    settings = SimpleNamespace(get=lambda key, default=None: {"connectors.mt5.folder": str(tmp_path), "privacy.mask_accounts": True}.get(key, default))
+    conn = MT5Bridge(SimpleNamespace(settings=settings, secrets=None))
+    import asyncio
+    acc = asyncio.run(conn.account())[0]
+    pos = asyncio.run(conn.positions())[0]
+    assert acc["login"] == "…123" and acc["equity"] == 9900 and acc["trade_allowed"] and acc["fresh"]
+    assert pos["risk_to_stop"] == 50 and not pos["manual"] and pos["account"] == "…123"
+    assert read_tsv(tmp_path / "missing.tsv") is None
+
+
+def test_stale_bridge_file_is_flagged(tmp_path):
+    _write(tmp_path, "account_1.tsv", "account", ["login", "equity"], [["1", "5"]], age=600)
+    settings = SimpleNamespace(get=lambda key, default=None: {"connectors.mt5.folder": str(tmp_path)}.get(key, default))
+    import asyncio
+    acc = asyncio.run(MT5Bridge(SimpleNamespace(settings=settings, secrets=None)).account())[0]
+    assert acc["fresh"] is False
+
+
+# ------------------------------------------------------------------ research reader
+def test_reader_extracts_text_and_drops_scripts():
+    html = """<html><head><title>T</title><meta property="og:title" content="Real title"><script>evil()</script></head>
+    <body><nav>menu</nav><article><h2>Section</h2><p>First paragraph with enough words to count as real text here.</p>
+    <script>alert(1)</script><ul><li>point one</li></ul><blockquote>quoted</blockquote></article><footer>f</footer></body></html>"""
+    a = research.extract(html, "https://example.com/x")
+    texts = [b["text"] for b in a["blocks"]]
+    assert a["title"] == "Real title" and "Section" in texts and "point one" in texts
+    assert not any("alert" in t or "evil" in t or "menu" in t for t in texts)
+    assert a["teaser_only"]
+
+
+@pytest.mark.parametrize("url,ok", [("https://example.com/a", True), ("http://127.0.0.1:8765/api", False),
+                                    ("http://localhost/x", False), ("http://192.168.1.10/", False), ("file:///etc/passwd", False)])
+def test_reader_blocks_local_addresses(url, ok):
+    assert research.safe_url(url) is ok
+
+
+# ------------------------------------------------------------------ AI prompt
+def test_ai_context_is_compacted_and_capped():
+    ctx = {"page": "X", "rows": [{"v": 1.23456789, "none": None, "spark": [1, 2, 3]} for _ in range(100)]}
+    text = assist.context_json(ctx)
+    assert "1.2346" in text and "spark" not in text and "none" not in text
+    assert len(assist.context_json({"big": "x" * 100_000}, max_chars=1000)) < 1100
+
+
+def test_system_prompt_carries_the_rules():
+    p = assist.system_prompt("explain", "German")
+    assert "ONLY facts" in p and "German" in p and "no price targets" in p
+    support = assist.system_prompt("support", "English", [{"id": "yahoo", "name": "Yahoo", "tier": "free", "active": True}])
+    assert "DOCUMENTATION" in support and "yahoo" in support
