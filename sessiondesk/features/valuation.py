@@ -188,7 +188,8 @@ async def profile(ctx, symbol: str) -> dict:
         if "error" in res:
             return res
         return res["data"]
-    return await ctx.cache.get(f"profile:{symbol}", 12 * 3600, build, disk=True)
+    # "v2": the profile gained short-interest/float fields - older cached copies lack them.
+    return await ctx.cache.get(f"profile:v2:{symbol}", 12 * 3600, build, disk=True)
 
 
 async def valuation(ctx, symbol: str) -> dict:

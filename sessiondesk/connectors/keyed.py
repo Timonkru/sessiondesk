@@ -230,7 +230,7 @@ class Polygon(Connector):
         return out
 
     async def history(self, symbol: str, range_: str = "1y", interval: str | None = None) -> dict:
-        days = {"1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827}.get(range_, 366)
+        days = {"1mo": 31, "3mo": 92, "6mo": 183, "1y": 366, "2y": 731, "5y": 1827, "10y": 3653}.get(range_.removesuffix("-d"), 366)
         end = dt.date.today()
         d = await self._get(f"/v2/aggs/ticker/{symbol}/range/1/day/{(end - dt.timedelta(days=days)).isoformat()}/{end.isoformat()}",
                             adjusted="true", sort="asc", limit=50000)

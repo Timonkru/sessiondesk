@@ -52,20 +52,23 @@ export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.to
   return wrap;
 }
 
-export function bars(rows, { height = 160, fmt = (v) => v.toFixed(2) } = {}) {
-  // Horizontal-free simple column chart for small series (e.g. Fed path).
-  const W = 1000, H = height, pad = 24;
-  const vals = rows.map((r) => r.value);
-  const min = Math.min(0, ...vals), max = Math.max(0, ...vals) || 1;
-  const bw = (W - pad * 2) / rows.length;
-  const Y = (v) => pad + (1 - (v - min) / (max - min || 1)) * (H - pad * 2);
-  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", class: "chart-svg bars" });
-  root.appendChild(svg("line", { x1: pad, x2: W - pad, y1: Y(0), y2: Y(0), class: "gridline" }));
-  rows.forEach((r, i) => {
-    const x = pad + i * bw + bw * 0.15, y0 = Y(0), y1 = Y(r.value);
-    root.appendChild(svg("rect", { x, width: bw * 0.7, y: Math.min(y0, y1), height: Math.max(1, Math.abs(y1 - y0)), class: r.value >= 0 ? "bar up" : "bar down" }));
-    root.appendChild(svg("text", { x: x + bw * 0.35, y: H - 6, class: "axis", "text-anchor": "middle" }, r.label));
-    root.appendChild(svg("text", { x: x + bw * 0.35, y: Math.min(y0, y1) - 4, class: "axis", "text-anchor": "middle" }, fmt(r.value)));
-  });
-  return h("div", { class: "chart" }, root);
+export function bars(rows, { height = 150, fmt = (v) => v.toFixed(2) } = {}) {
+  // HTML columns (crisp text at any width). Negative values hang below a zero line.
+  rows = (rows || []).filter((r) => r.value !== null && r.value !== undefined && Number.isFinite(r.value));
+  const wrap = h("div", { class: "bars", style: { height: height + "px" } });
+  if (!rows.length) { wrap.appendChild(h("p", { class: "muted" }, "No data.")); return wrap; }
+  const max = Math.max(0, ...rows.map((r) => r.value)), min = Math.min(0, ...rows.map((r) => r.value));
+  const span = max - min || 1;
+  const plot = height - 34;                                    // room for value + label text
+  const zeroFromTop = (max / span) * plot;
+  for (const r of rows) {
+    const hgt = Math.max(1, (Math.abs(r.value) / span) * plot);
+    const top = r.value >= 0 ? zeroFromTop - hgt : zeroFromTop;
+    wrap.appendChild(h("div", { class: "barcol", title: `${r.label}: ${fmt(r.value)}` },
+      h("div", { class: "barval", style: { top: Math.max(0, (r.value >= 0 ? top : top + hgt) - (r.value >= 0 ? 15 : -2)) + "px" } }, fmt(r.value)),
+      h("div", { class: "bar " + (r.value >= 0 ? "up" : "down"), style: { top: top + "px", height: hgt + "px" } }),
+      h("div", { class: "barlabel" }, r.label)));
+  }
+  wrap.appendChild(h("div", { class: "barzero", style: { top: zeroFromTop + "px" } }));
+  return wrap;
 }

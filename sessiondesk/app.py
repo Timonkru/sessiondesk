@@ -34,7 +34,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import flows, jobs, macro, markets, movers, news, research, stocks, valuation
+from .features import deep, flows, jobs, macro, markets, movers, news, research, stocks, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -180,6 +180,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     @app.get("/api/stock/{symbol}/valuation")
     async def stock_valuation(symbol: str):
         return await valuation.valuation(C(), symbol)
+
+    @app.get("/api/stock/{symbol}/deep/{block}")
+    async def stock_deep(symbol: str, block: str):
+        fn = {"statements": deep.statements, "street": deep.street, "ownership": deep.ownership, "options": deep.options,
+              "performance": deep.performance, "earnings": deep.earnings, "dividends": deep.dividends,
+              "peers": deep.peers_table}.get(block)
+        if not fn:
+            return {"error": "unknown block"}
+        return await fn(C(), symbol)
 
     @app.get("/api/watchlist")
     async def watchlist():

@@ -9,7 +9,10 @@ from .valuation import profile
 
 PROFILE_FIELDS = ("name", "sector", "industry", "country", "website", "employees", "summary", "exchange", "currency",
                   "market_cap", "enterprise_value", "shares", "beta", "avg_volume", "high_52w", "low_52w",
-                  "dividend_yield", "earnings_ts", "earnings_start", "earnings_end", "ex_dividend", "type")
+                  "dividend_yield", "earnings_ts", "earnings_start", "earnings_end", "ex_dividend", "type",
+                  "pe_forward", "pe_trailing", "ev_ebitda", "ps", "pb", "short_pct_float", "short_ratio", "shares_short",
+                  "shares_short_prior", "short_date", "float_shares", "held_insiders", "held_institutions",
+                  "target_mean", "recommendation", "analysts", "revenue_growth", "operating_margin", "net_margin")
 
 
 async def history(ctx, symbol: str, range_: str = "1y") -> dict:
@@ -54,7 +57,8 @@ async def summary(ctx, symbol: str, profile_wait: float = 1.5) -> dict:
     if not info.get("name") and "error" not in day:
         info["name"] = day.get("name")
     member = universe.lookup(symbol)
-    return {"symbol": symbol, "quote": quote, "profile": info, "index": universe.UNIVERSES.get(member["universe"]) if member else None,
+    kind = (info.get("type") or ("" if "error" in day else day.get("type")) or "").upper()
+    return {"symbol": symbol, "type": kind, "quote": quote, "profile": info, "index": universe.UNIVERSES.get(member["universe"]) if member else None,
             "sector_etf": universe.sector_etf(symbol, info.get("sector")), "peers": universe.peers(symbol, 8),
             "profile_error": None if prof.get("pending") else prof.get("error"), "profile_pending": bool(prof.get("pending")),
             "asof": time.time()}

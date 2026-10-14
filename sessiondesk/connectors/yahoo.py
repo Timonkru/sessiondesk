@@ -96,6 +96,8 @@ class Yahoo(Connector):
 
     # ------------------------------------------------------------ history
     async def history(self, symbol: str, range_: str = "1y", interval: str | None = None) -> dict:
+        if range_.endswith("-d"):                      # "10y-d" = daily bars over the whole range (statistics)
+            range_, interval = range_[:-2], "1d"
         interval = interval or RANGES.get(range_, "1d")
         async with self._sem:
             resp = await self.ctx.http.get(CHART + symbol, params={"range": range_, "interval": interval,
@@ -210,6 +212,10 @@ PROFILE_KEYS = {
     # street
     "targetMeanPrice": "target_mean", "targetHighPrice": "target_high", "targetLowPrice": "target_low",
     "numberOfAnalystOpinions": "analysts", "recommendationKey": "recommendation", "recommendationMean": "recommendation_mean",
+    # short interest / float
+    "sharesShort": "shares_short", "sharesShortPriorMonth": "shares_short_prior", "shortPercentOfFloat": "short_pct_float",
+    "shortRatio": "short_ratio", "dateShortInterest": "short_date", "floatShares": "float_shares",
+    "heldPercentInsiders": "held_insiders", "heldPercentInstitutions": "held_institutions",
     # dates
     "earningsTimestamp": "earnings_ts", "earningsTimestampStart": "earnings_start", "earningsTimestampEnd": "earnings_end",
     "exDividendDate": "ex_dividend",
