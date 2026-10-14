@@ -103,6 +103,9 @@ class AnthropicProvider(AIProvider):
         except anthropic.RateLimitError as exc:
             raise ConnectorError("Anthropic: rate limit - try again in a minute") from exc
         except anthropic.BadRequestError as exc:
+            if "credit balance" in str(exc.message).lower():
+                raise ConnectorError("Anthropic: the key works, but the account has no credit left - "
+                                     "top up at console.anthropic.com -> Plans & Billing") from exc
             raise ConnectorError(f"Anthropic: bad request - {exc.message}") from exc
         except anthropic.APIStatusError as exc:
             raise ConnectorError(f"Anthropic: API error {exc.status_code}") from exc

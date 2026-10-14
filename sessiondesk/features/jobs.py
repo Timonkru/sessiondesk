@@ -173,7 +173,7 @@ class JobManager:
                 self.errors.append(f"{path.name}: {exc}")
                 continue
             root = (path.parent / cfg.get("workspace", ".")).resolve()
-            python = cfg.get("python")
+            python = cfg.get("python") or self.ctx.settings.get("jobs_python") or None
             for j in cfg.get("jobs", []):
                 try:
                     job = Job(id=j["id"], name=j.get("name", j["id"]), group=j.get("group", ""),

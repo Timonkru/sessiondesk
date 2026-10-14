@@ -13,8 +13,10 @@ from .base import Connector
 
 DEFAULT_FEEDS: dict[str, list[dict]] = {
     "squawk": [
+        # "tg:<channel>" = public Telegram channel preview (no login). Squawk channels are the fastest free wire.
+        {"name": "FinancialJuice", "url": "tg:financialjuice"},
+        {"name": "Walter Bloomberg", "url": "tg:WalterBloomberg"},
         {"name": "investingLive", "url": "https://investinglive.com/feed/"},
-        {"name": "FinancialJuice", "url": "https://www.financialjuice.com/feed.ashx?xy=rss"},
     ],
     "markets": [
         {"name": "CNBC Markets", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},

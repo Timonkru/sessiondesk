@@ -43,6 +43,40 @@ def parse_feed(content: bytes, source: str) -> list[dict]:
     return out
 
 
+TG_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+
+
+def parse_telegram(page: str, source: str, channel: str) -> list[dict]:
+    """Public web preview of a Telegram channel (t.me/s/<channel>): no login, the last ~20 posts.
+    Squawk channels post one-line headlines seconds after the wire - often well before RSS feeds."""
+    import datetime as dt
+    out = []
+    for block in page.split('class="tgme_widget_message_wrap')[1:]:
+        post = re.search(r'data-post="([^"]+)"', block)
+        when = re.search(r'datetime="([^"]+)"', block)
+        body = re.search(r'tgme_widget_message_text[^>]*>(.*?)</div>', block, re.S)
+        if not (post and body):
+            continue
+        text = html.unescape(re.sub(r"<br\s*/?>", " ", body.group(1)))
+        text = " ".join(re.sub(r"<[^>]+>", "", text).split())
+        text = re.sub(r"\s*\(@\w+\)\s*$", "", text)            # channel signature "(@Channel)"
+        text = re.sub(r"\s*\|\s*\w{1,4}\s*$", "", text)          # ... or "|XX"
+        text = re.sub(r"\s*\$[A-Z]{2,}\b", "", text).strip()       # topic tags like "$MACRO"
+        if not text:
+            continue
+        published = time.time()
+        if when:
+            try:
+                published = dt.datetime.fromisoformat(when.group(1).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                pass
+        link = f"https://t.me/{post.group(1)}"
+        out.append({"id": stable_id(link), "title": text[:300], "url": link, "source": source,
+                    "published": int(published), "summary": "", "author": None, "undated": not when})
+    out.reverse()                                              # newest first, like RSS
+    return out
+
+
 class FeedFetcher:
     """Remembers validators per URL so repeated polls are conditional, and backs off when a feed
     rate-limits (HTTP 429/503): Retry-After if given, else 2 min doubling up to 30 min. While a feed
@@ -57,14 +91,21 @@ class FeedFetcher:
         self._backoff: dict[str, float] = {}
 
     async def fetch(self, url: str, source: str, timeout: float = 15.0) -> list[dict]:
+        """RSS/Atom URL, or "tg:<channel>" for a public Telegram channel."""
         now = time.time()
         if self._blocked_until.get(url, 0) > now:
             if url in self._last:
                 return self._last[url]
             raise RuntimeError(f"{source}: rate limited, next try in {int(self._blocked_until[url] - now)} s")
-        headers = {"User-Agent": self.ua, "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"}
-        headers.update(self._validators.get(url, {}))
-        resp = await self.http.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+        telegram = url.startswith("tg:")
+        if telegram:
+            fetch_url = "https://t.me/s/" + url[3:].strip().lstrip("@")
+            headers = {"User-Agent": TG_UA}
+        else:
+            fetch_url = url
+            headers = {"User-Agent": self.ua, "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*"}
+            headers.update(self._validators.get(url, {}))
+        resp = await self.http.get(fetch_url, headers=headers, timeout=timeout, follow_redirects=True)
         if resp.status_code == 304:
             return self._last.get(url, [])
         if resp.status_code in (429, 503):
@@ -75,6 +116,10 @@ class FeedFetcher:
         if resp.status_code != 200:
             raise RuntimeError(f"{source}: HTTP {resp.status_code}")
         self._backoff.pop(url, None)
+        if telegram:
+            items = parse_telegram(resp.text, source, url[3:])
+            self._last[url] = items
+            return items
         validators = {}
         if resp.headers.get("etag"):
             validators["If-None-Match"] = resp.headers["etag"]

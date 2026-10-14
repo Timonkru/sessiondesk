@@ -123,3 +123,46 @@ def test_system_prompt_carries_the_rules():
     assert "ONLY facts" in p and "German" in p and "no price targets" in p
     support = assist.system_prompt("support", "English", [{"id": "yahoo", "name": "Yahoo", "tier": "free", "active": True}])
     assert "DOCUMENTATION" in support and "yahoo" in support
+
+
+# ------------------------------------------------------------------ earlier export format + Telegram
+def test_legacy_export_files_are_understood(tmp_path):
+    now = int(time.time())
+    (tmp_path / "status_777000111.tsv").write_text(
+        f"#updated\t{now}\t777000111\nbalance\t10000\nequity\t10050.5\ncurrency\tEUR\nconnected\t1\nalgo_terminal\t1\n"
+        "algo_account\t1\nrisk_multiplier\t0.5\nchart\tGER40\tPERIOD_M15\tSomeEA\n", encoding="utf-8")
+    (tmp_path / "pos_777000111.tsv").write_text(
+        f"#updated\t{now}\t777000111\t10050.5\tEUR\tbridge-v2\nGER40\tLONG\t1.0000\t24000.0\t23950.0\t50.00\t50.00\t202510\t9\t2.4\t9\t{now - 600}\n",
+        encoding="utf-8")
+    (tmp_path / "deals_777000111.tsv").write_text(
+        f"#updated\t{now}\t777000111\t10000\t10050.5\tEUR\n{now - 900}\t9\tGER40\t202510\tBUY\t0\t1.00\t0.00\t-2.00\n"
+        f"{now - 300}\t9\tGER40\t202510\tSELL\t1\t1.00\t40.00\t-2.00\n", encoding="utf-8")
+    (tmp_path / "calendar.tsv").write_text(f"#updated\t{now}\n{now + 3600}\tUSD\t3\tCore CPI m/m\t\t0.2\t0.3\t%\t0\n", encoding="utf-8")
+    settings = SimpleNamespace(get=lambda key, default=None: {"connectors.mt5.folder": f"{tmp_path};{tmp_path / 'missing'}",
+                                                              "privacy.mask_accounts": False}.get(key, default))
+    conn = MT5Bridge(SimpleNamespace(settings=settings, secrets=None))
+    import asyncio
+    acc = asyncio.run(conn.account())[0]
+    assert acc["equity"] == 10050.5 and acc["trade_allowed"] and acc["extra"]["risk_multiplier"] == "0.5" and acc["fresh"]
+    pos = asyncio.run(conn.positions())[0]
+    assert pos["magic"] == "202510" and pos["risk_to_stop"] == 50 and pos["sl"] == 23950
+    eas = asyncio.run(conn.eas())
+    assert eas[0]["expert"] == "SomeEA" and eas[0]["timeframe"] == "M15"
+    from sessiondesk.features.broker import ea_performance
+    perf = ea_performance(asyncio.run(conn.deals()), time.time() - 86400, {"202510": "Breakout"})
+    assert perf[0]["label"] == "Breakout" and perf[0]["trades"] == 1 and perf[0]["net"] == pytest.approx(36.0)
+    cal = asyncio.run(conn.calendar())
+    assert cal[0]["title"] == "Core CPI m/m" and cal[0]["impact"] == "high" and cal[0]["forecast"] == "0.2%"
+
+
+def test_telegram_preview_parser():
+    from sessiondesk.features.feeds import parse_telegram
+    page = ('<div class="tgme_widget_message_wrap"><div data-post="chan/101"></div>'
+            '<div class="tgme_widget_message_text js-message_text">US CPI MoM Actual 0.4% (Forecast 0.2%) $MACRO</div>'
+            '<time datetime="2026-10-14T12:30:01+00:00"></time></div>'
+            '<div class="tgme_widget_message_wrap"><div data-post="chan/102"></div>'
+            '<div class="tgme_widget_message_text">FED&#39;S WALLER: CUTS STILL APPROPRIATE (@Chan)</div>'
+            '<time datetime="2026-10-14T12:31:00+00:00"></time></div>')
+    items = parse_telegram(page, "Chan", "chan")
+    assert [i["title"] for i in items] == ["FED'S WALLER: CUTS STILL APPROPRIATE", "US CPI MoM Actual 0.4% (Forecast 0.2%)"]
+    assert items[0]["url"] == "https://t.me/chan/102" and items[1]["published"] < items[0]["published"]
