@@ -19,10 +19,20 @@ class Broker:
         self._subs: set[asyncio.Queue] = set()
         self._recent: deque[dict] = deque(maxlen=backlog)
         self._ids = itertools.count(1)
+        self._listeners: list = []
+
+    def listen(self, fn) -> None:
+        """In-process callback for every event (used by the activity feed). Must be quick and never raise."""
+        self._listeners.append(fn)
 
     def publish(self, kind: str, payload: dict) -> dict:
         event = {"id": next(self._ids), "kind": kind, "ts": time.time(), **payload}
         self._recent.append(event)
+        for fn in self._listeners:
+            try:
+                fn(event)
+            except Exception:
+                pass
         for queue in list(self._subs):
             try:
                 queue.put_nowait(event)

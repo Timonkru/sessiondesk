@@ -3,7 +3,10 @@ import { api, connect, on, streamChat } from "./lib/api.js";
 import { h, clear, toast, notify, beep, markdown, countdown, errorBox } from "./lib/ui.js";
 
 const VIEWS = {
+  today: () => import("./views/today.js"),
   overview: () => import("./views/overview.js"),
+  markets: () => import("./views/overview.js"),
+  journal: () => import("./views/journal.js"),
   stock: () => import("./views/stock.js"),
   watch: () => import("./views/watch.js"),
   levels: () => import("./views/levels.js"),
@@ -33,7 +36,8 @@ const ctx = {
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-  const name = parts[0] && VIEWS[parts[0]] ? parts[0] : "overview";
+  let name = parts[0] && VIEWS[parts[0]] ? parts[0] : "today";
+  if (name === "markets") name = "overview";
   return { name, params: parts.slice(1) };
 }
 
@@ -220,6 +224,10 @@ function wirePush() {
     toast(alert.title, alert.body, { kind: (alert.data || {}).direction === "up" ? "up" : "down", onClick: () => ctx.go("#/levels") });
     notify("Level: " + alert.title, alert.body);
     beep("info");
+  });
+  on("position", ({ title, position }) => {
+    toast(title, "", { kind: position && position.sl ? "" : "high", onClick: () => ctx.go("#/broker") });
+    notify("Position", title);
   });
   on("alert_digest", ({ count, top }) => {
     toast(`${count} unusual moves today`, (top || []).join(" · "), { onClick: () => ctx.go("#/watch") });

@@ -34,7 +34,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import deep, flows, jobs, levels, macro, markets, movers, news, research, risk, stocks, valuation
+from .features import deep, flows, jobs, levels, macro, markets, movers, news, research, risk, stocks, today, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -330,6 +330,56 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return await risk.event_history(ctx)
         return await ctx.cache.get("cal:history", 3 * 3600, build)
 
+    @app.get("/api/journal")
+    async def get_journal(days: int = 30):
+        from .features import journal
+        return await journal.view(C(), min(days, 365))
+
+    @app.post("/api/journal")
+    async def set_journal(request: Request):
+        body = await request.json()
+        risk_value = body.get("risk")
+        try:
+            risk_value = float(risk_value) if risk_value not in (None, "") else None
+        except (TypeError, ValueError):
+            return {"error": "risk must be a number (money in account currency)"}
+        await C().db.run(C().db.journal_set, str(body.get("account")), str(body.get("position_id")), risk_value,
+                         body.get("note") if body.get("note") is not None else None)
+        return {"ok": True}
+
+    @app.get("/api/today")
+    async def get_today():
+        return await today.snapshot(C())
+
+    @app.get("/api/activity")
+    async def get_activity(limit: int = 100):
+        return {"items": await C().db.run(C().db.activity, min(limit, 500))}
+
+    @app.get("/api/notes")
+    async def get_notes():
+        return {"items": await C().db.run(C().db.notes, 60)}
+
+    @app.post("/api/notes")
+    async def add_note(request: Request):
+        body = await request.json()
+        text = str(body.get("text", "")).strip()[:500]
+        if not text:
+            return {"error": "empty note"}
+        ctx = C()
+        await ctx.db.run(ctx.db.add_note, text, str(body.get("symbol", ""))[:20], str(body.get("account", ""))[:20])
+        await ctx.db.run(ctx.db.add_activity, "note", text[:120])
+        return {"items": await ctx.db.run(ctx.db.notes, 60)}
+
+    @app.get("/api/briefing")
+    async def get_briefing(kind: str = "briefing"):
+        return {"item": await C().db.run(C().db.briefing, kind)}
+
+    @app.post("/api/briefing")
+    async def make_briefing(request: Request):
+        body = await request.json()
+        kind = "review" if body.get("kind") == "review" else "briefing"
+        return await run_briefing(C(), kind)
+
     @app.get("/api/levels")
     async def get_levels():
         ctx = C()
@@ -452,7 +502,9 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def patch_settings(request: Request):
         body = await request.json()
         body.pop("connectors", None)                   # connectors go through their own endpoint
-        lists = {k: body.pop(k) for k in list(body) if isinstance(body[k], list)}
+        # Lists and whole-object settings are replaced, everything else is merged key by key.
+        replace = {"prop_rules", "sessions", "round_steps", "magic_names", "asset_patterns"}
+        lists = {k: body.pop(k) for k in list(body) if isinstance(body[k], list) or k in replace}
         ctx = C()
         if body:
             ctx.settings.update(body)
@@ -485,6 +537,52 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return Response((STATIC / "sessiondesk.ico").read_bytes(), media_type="image/x-icon")
 
     return app
+
+
+async def run_briefing(ctx, kind: str) -> dict:
+    facts = await today.briefing_facts(ctx, kind)
+    question = "Write today's briefing." if kind == "briefing" else "Write the weekly review."
+    res = await assist.complete(ctx, kind, question, facts)
+    if "text" in res:
+        await ctx.db.run(ctx.db.add_briefing, kind, res["text"], res.get("provider", ""), res.get("model", ""))
+        await ctx.db.run(ctx.db.add_activity, "briefing", f"{kind} written")
+        ctx.broker.publish("briefing", {"kind": kind})
+    return res
+
+
+ACTIVITY_KINDS = {"alert": "move", "level": "level", "release": "release", "release_headline": "release", "event_warning": "event"}
+
+
+def record_activity(ctx):
+    """Broker listener: keep a durable log of what happened (shown on Today as 'Changes')."""
+    def on_event(ev: dict) -> None:
+        kind = ev.get("kind")
+        title = body = ""
+        if kind in ("alert", "level"):
+            a = ev.get("alert") or {}
+            title, body = a.get("title", ""), a.get("body", "")
+        elif kind == "release":
+            e = ev.get("event") or {}
+            title = f"{e.get('currency')} {e.get('title')}: {e.get('actual')} (fcst {e.get('forecast')})"
+        elif kind == "release_headline":
+            title = (ev.get("headline") or {}).get("title", "")
+        elif kind == "event_warning":
+            e = ev.get("event") or {}
+            title = f"{e.get('currency')} {e.get('title')} in {ev.get('minutes')} min"
+        elif kind == "job":
+            j = ev.get("job") or {}
+            if j.get("status") not in ("ok", "failed"):
+                return
+            title, body = f"job {j.get('name')}: {j.get('status')}", j.get("issue") or ""
+        elif kind == "news" and (ev.get("item") or {}).get("impact") == "high":
+            title = (ev.get("item") or {}).get("title", "")
+        else:
+            return
+        try:
+            ctx.db.add_activity(ACTIVITY_KINDS.get(kind, kind), title[:300], body[:500])
+        except Exception:
+            pass
+    return on_event
 
 
 def lambda_scan(ctx, result: dict | None = None):
@@ -557,6 +655,45 @@ def background(ctx) -> list:
     async def prune():
         await ctx.db.run(ctx.db.prune_news, 120)
 
+    ctx.broker.listen(record_activity(ctx))
+    book_state: dict = {"open": None}
+
+    async def watch_positions():
+        """Position opened / closed -> activity feed + push; also feeds the journal."""
+        from .features import broker as broker_view
+        from .features import journal
+        b = await broker_view.overview(ctx)
+        if not b.get("connected"):
+            return
+        fresh = [p for p in b.get("positions", []) if p.get("fresh", True)]
+        current = {(p.get("account"), p.get("ticket") or p.get("position_id") or f"{p.get('symbol')}{p.get('side')}{p.get('open_price')}"): p
+                   for p in fresh}
+        if book_state["open"] is not None:
+            for key, p in current.items():
+                if key not in book_state["open"]:
+                    title = f"{p['account']} opened {p['symbol']} {p['side']} {p.get('volume')}" + ("" if p.get("sl") else " - NO STOP")
+                    await ctx.db.run(ctx.db.add_activity, "position", title, "", str(key))
+                    ctx.broker.publish("position", {"title": title, "position": p})
+            for key, p in book_state["open"].items():
+                if key not in current:
+                    title = f"{p['account']} closed {p['symbol']} {p['side']}"
+                    await ctx.db.run(ctx.db.add_activity, "position", title, "", str(key))
+                    ctx.broker.publish("position", {"title": title, "position": p})
+        book_state["open"] = current
+        await journal.sync(ctx, b)
+
+    async def scheduled_briefing():
+        when = ctx.settings.get("briefing_time")
+        if not when:
+            return
+        now = dt.datetime.now()
+        if now.weekday() >= 5 or now.strftime("%H:%M") < when:
+            return
+        last = await ctx.db.run(ctx.db.briefing, "briefing")
+        if last and dt.datetime.fromtimestamp(last["ts"]).date() == now.date():
+            return
+        await run_briefing(ctx, "briefing")
+
     alerter = levels.LevelAlerter(cooldown=600)
     level_state = {"next": 0.0}
 
@@ -584,6 +721,8 @@ def background(ctx) -> list:
         every(lambda: max(60, (ctx.settings.get("alerts") or {}).get("scan_minutes", 5) * 60), scan, first_delay=20, name="movers"),
         every(lambda: 86400, prune, first_delay=300, name="prune"),
         every(lambda: 5, level_alerts, first_delay=25, name="levels"),
+        every(lambda: 10, watch_positions, first_delay=12, name="positions"),
+        every(lambda: 60, scheduled_briefing, first_delay=90, name="briefing"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
     ]

@@ -24,6 +24,18 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX IF NOT EXISTS alerts_ts ON alerts(ts DESC);
 CREATE TABLE IF NOT EXISTS saved (
   url TEXT PRIMARY KEY, title TEXT, source TEXT, saved REAL, note TEXT);
+CREATE TABLE IF NOT EXISTS day_start (
+  account TEXT, day TEXT, balance REAL, equity REAL, ts REAL, PRIMARY KEY (account, day));
+CREATE TABLE IF NOT EXISTS activity (
+  ts REAL, kind TEXT, title TEXT, body TEXT, ref TEXT);
+CREATE INDEX IF NOT EXISTS activity_ts ON activity(ts DESC);
+CREATE TABLE IF NOT EXISTS notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, text TEXT, symbol TEXT, account TEXT, ref TEXT);
+CREATE TABLE IF NOT EXISTS briefings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT, text TEXT, provider TEXT, model TEXT);
+CREATE TABLE IF NOT EXISTS journal (
+  account TEXT, position_id TEXT, symbol TEXT, side TEXT, magic TEXT, opened REAL, closed REAL, net REAL,
+  risk_observed REAL, risk_confirmed REAL, note TEXT, context TEXT, PRIMARY KEY (account, position_id));
 CREATE TABLE IF NOT EXISTS ai_usage (
   ts REAL, day TEXT, task TEXT, provider TEXT, model TEXT, tok_in INTEGER, tok_out INTEGER, cost REAL);
 """
@@ -181,7 +193,70 @@ class DB:
                           "FROM ai_usage GROUP BY day ORDER BY day DESC LIMIT ?", (days,))
 
 
+    # ------------------------------------------------------------ day start (prop meter)
+    def day_start(self, account: str, day: str, balance: float | None, equity: float | None) -> dict:
+        """First balance/equity seen for the account on that trading day (kept once stored)."""
+        with self._lock:
+            row = self._conn.execute("SELECT balance, equity, ts FROM day_start WHERE account=? AND day=?", (account, day)).fetchone()
+            if row:
+                return dict(row)
+            if balance is None and equity is None:
+                return {}
+            self._conn.execute("INSERT INTO day_start VALUES (?,?,?,?,?)", (account, day, balance, equity, time.time()))
+            self._conn.commit()
+            return {"balance": balance, "equity": equity, "ts": time.time()}
+
+    # ------------------------------------------------------------ activity feed
+    def add_activity(self, kind: str, title: str, body: str = "", ref: str = "") -> None:
+        self._exec("INSERT INTO activity VALUES (?,?,?,?,?)", (time.time(), kind, title, body, ref))
+
+    def activity(self, limit: int = 100, since: float | None = None) -> list[dict]:
+        if since:
+            return self._exec("SELECT * FROM activity WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (since, limit))
+        return self._exec("SELECT * FROM activity ORDER BY ts DESC LIMIT ?", (limit,))
+
+    # ------------------------------------------------------------ notes
+    def add_note(self, text: str, symbol: str = "", account: str = "", ref: str = "") -> None:
+        self._exec("INSERT INTO notes(ts,text,symbol,account,ref) VALUES (?,?,?,?,?)", (time.time(), text, symbol, account, ref))
+
+    def notes(self, limit: int = 50) -> list[dict]:
+        return self._exec("SELECT * FROM notes ORDER BY ts DESC LIMIT ?", (limit,))
+
+    # ------------------------------------------------------------ briefings
+    def add_briefing(self, kind: str, text: str, provider: str = "", model: str = "") -> None:
+        self._exec("INSERT INTO briefings(ts,kind,text,provider,model) VALUES (?,?,?,?,?)", (time.time(), kind, text, provider, model))
+
+    def briefing(self, kind: str) -> dict | None:
+        rows = self._exec("SELECT * FROM briefings WHERE kind=? ORDER BY ts DESC LIMIT 1", (kind,))
+        return rows[0] if rows else None
+
+    # ------------------------------------------------------------ journal
+    def journal_upsert(self, row: dict) -> None:
+        """Insert or refresh a trade; user fields (risk_confirmed, note) and the first observed risk/context are kept."""
+        with self._lock:
+            old = self._conn.execute("SELECT risk_observed, risk_confirmed, note, context FROM journal WHERE account=? AND position_id=?",
+                                     (row["account"], row["position_id"])).fetchone()
+            keep = dict(old) if old else {}
+            self._conn.execute(
+                "INSERT OR REPLACE INTO journal VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (row["account"], row["position_id"], row.get("symbol"), row.get("side"), row.get("magic"), row.get("opened"),
+                 row.get("closed"), row.get("net"), keep.get("risk_observed") if keep.get("risk_observed") is not None else row.get("risk_observed"),
+                 keep.get("risk_confirmed"), keep.get("note"), keep.get("context") or row.get("context")))
+            self._conn.commit()
+
+    def journal_set(self, account: str, position_id: str, risk: float | None = None, note: str | None = None) -> None:
+        if risk is not None:
+            self._exec("UPDATE journal SET risk_confirmed=? WHERE account=? AND position_id=?", (risk, account, position_id))
+        if note is not None:
+            self._exec("UPDATE journal SET note=? WHERE account=? AND position_id=?", (note, account, position_id))
+
+    def journal(self, since: float = 0, limit: int = 500) -> list[dict]:
+        return self._exec("SELECT * FROM journal WHERE COALESCE(closed, opened, 0) >= ? ORDER BY COALESCE(closed, opened) DESC LIMIT ?",
+                          (since, limit))
+
+
 def _fts_query(q: str) -> str:
     """User text -> safe FTS5 query: every word as a prefix term, AND-ed."""
     words = [w for w in "".join(c if c.isalnum() else " " for c in q).split() if w]
     return " ".join(f'"{w}"*' for w in words) or '""'
+

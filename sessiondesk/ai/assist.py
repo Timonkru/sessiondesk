@@ -42,6 +42,15 @@ MODES = {
     "summarize": "You summarize a research article or news story for a trader. Structure: (1) the core claim in one sentence, "
                  "(2) the evidence offered and its quality (sample, period, method - only if stated), (3) what it could mean "
                  "for markets, labelled as interpretation, (4) open questions. Quote numbers only from the article text.",
+    "briefing": "You write the pre-session briefing for a trader from the CONTEXT JSON (all times in it are UTC - say so). "
+                "Structure with short headings: 1) Overnight - what moved and the headlines behind it; 2) Today - the scheduled "
+                "releases with time, forecast and previous, and which of the trader's own schedule entries collide with them; "
+                "3) Context - volatility state, forced flows in the next days, unusual single-stock moves; 4) Accounts - day P/L, "
+                "room to the loss limits, rule flags; 5) Watch list - what the data says deserves attention. No trade instructions.",
+    "review": "You review the trader's last week from the CONTEXT JSON: closed trades by setup (n, net, win rate), journal "
+              "entries (R where an initial risk is confirmed), notes and logged activity. Structure: what worked and what did not "
+              "per setup, EA vs manual trades, rule breaches, recurring patterns in the notes. Always state n and call results "
+              "with small n anecdotal. No trade instructions, no predictions.",
     "support": "You are SessionDesk's built-in help. Answer how-to questions about installing, configuring and using the app "
                "from the DOCUMENTATION below. Give exact menu paths and file names. If the docs do not cover the question, "
                "say so and point to the project's GitHub issues.",
@@ -119,10 +128,11 @@ async def chat(ctx, mode: str, question: str, context=None, history: list[dict] 
         content = f"CONTEXT JSON:\n{context_json(context)}\n\nQUESTION:\n{content or 'Explain this.'}"
     msgs.append({"role": "user", "content": content})
     effort = {"explain": "low", "summarize": "low", "support": "low"}.get(mode, ctx.settings.get("ai.effort") or "medium")
+    max_tokens = {"explain": 800, "briefing": 3000, "review": 3000}.get(mode, 4000)
     yield {"type": "meta", "provider": prov.id, "model": prov.model()}
     started = time.time()
     try:
-        async for chunk in prov.stream(system, msgs, max_tokens=4000 if mode != "explain" else 800, effort=effort):
+        async for chunk in prov.stream(system, msgs, max_tokens=max_tokens, effort=effort):
             yield {"type": "text", "text": chunk}
     except Exception as exc:
         yield {"type": "error", "error": str(exc)}

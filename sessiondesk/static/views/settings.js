@@ -108,7 +108,39 @@ export async function render(root, _params, ctx) {
     h("div", { class: "toolbar" }, h("button", { onclick: () => patch({ privacy: { mask_accounts: mask.checked } }) }, "Save")),
     note(`Data folder: ${s.data_dir} - settings, keys (secrets.json), cache, news archive and job logs. Nothing is sent anywhere except the requests to the sources you enable.`));
 
-  clear(body, aiSection, connSection, alertSection, feedsSection, privacy);
+  // ---------------------------------------------------------------- trading setup (JSON per key)
+  const ADV = [
+    ["prop_rules", "Prop rules per account", '{"*": {"daily_loss_pct": 5, "own_stop_pct": 1.5, "max_loss_pct": 10, "initial_balance": 100000, "risk_per_trade_pct": 0.25, "max_slots": 3}}'],
+    ["schedule", "Schedule entries", '[{"label": "opening range done", "session": "EU", "offset_min": 30}, {"label": "lunch", "session": "EU", "time": "12:15", "tz": "Europe/Berlin"}]'],
+    ["sessions", "Cash sessions (empty = EU + US)", '{"EU": {"open": "09:00", "close": "17:30", "tz": "Europe/Berlin", "calendar": "EU"}}'],
+    ["level_files", "Level files", '[{"title": "Gamma levels", "path": "C:/path/today_levels.txt"}]'],
+    ["level_markets", "Level markets without broker quotes", '["DAX", "NQ", "DOW", "SPX", "GOLD"]'],
+    ["round_steps", "Round-number steps", '{"DAX": 500, "GOLD": 50}'],
+    ["magic_names", "Setup names per EA magic number", '{"123456": "Opening breakout"}'],
+    ["asset_patterns", "Extra broker symbol patterns", '{"DAX": ["DE40.CASH"]}'],
+    ["scenario_drivers", "Scenario driver markets", '["NQ", "DAX"]'],
+  ];
+  const adv = section("Trading setup",
+    note("Personal setup lives only in your local data folder. Each box takes JSON; the example shows the shape."),
+    ...ADV.map(([key, label, example]) => {
+      const ta = h("textarea", { rows: 3, style: { width: "100%", fontFamily: "var(--mono)", fontSize: "12px" }, placeholder: example },
+        st[key] !== undefined && JSON.stringify(st[key]) !== "{}" && JSON.stringify(st[key]) !== "[]" ? JSON.stringify(st[key], null, 1) : "");
+      const status = h("span", { class: "small muted" });
+      const save = async () => {
+        let value;
+        try { value = ta.value.trim() ? JSON.parse(ta.value) : (Array.isArray(JSON.parse(example)) ? [] : {}); }
+        catch (e) { status.textContent = "not valid JSON: " + e.message; status.className = "small down"; return; }
+        const r = await api("/api/settings", { method: "PATCH", body: { [key]: value } });
+        status.textContent = r.error ? r.error : "saved"; status.className = "small " + (r.error ? "down" : "up");
+      };
+      return h("div", { style: { margin: "10px 0" } }, h("label", { class: "small" }, h("strong", null, label), h("span", { class: "muted" }, ` (${key})`)), ta,
+        h("div", { class: "toolbar", style: { margin: "4px 0" } }, h("button", { onclick: save }, "Save"), status));
+    }),
+    h("div", { class: "formgrid" }, h("label", null, "Daily AI briefing at"),
+      h("div", null, (() => { const i = h("input", { type: "text", value: st.briefing_time || "", placeholder: "08:40 (empty = off)", style: { width: "120px" } });
+        const b = h("button", { onclick: () => patch({ briefing_time: i.value.trim() }) }, "Save"); return [i, " ", b, h("span", { class: "muted small" }, "  weekdays, local time")]; })())));
+
+  clear(body, aiSection, connSection, alertSection, adv, feedsSection, privacy);
 }
 
 function connectorRow(it) {

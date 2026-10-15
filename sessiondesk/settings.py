@@ -69,6 +69,10 @@ DEFAULTS: dict = {
     "asset_patterns": {},               # extra broker-symbol patterns, e.g. {"DAX": ["DE40.CASH"]}
     "scenario_drivers": ["NQ", "DAX"],
     "scenario_shock_pct": -1.0,
+    "prop_rules": {},                   # see features/today.py: {"*": {"daily_loss_pct": 5, "risk_per_trade_pct": 0.5, ...}}
+    "sessions": {},                     # cash sessions for the schedule (default EU + US, see features/today.py)
+    "schedule": [],                     # your own times: {"label", "session", "offset_min"} or {"label", "session", "time", "tz"}
+    "briefing_time": "",                # e.g. "08:40" = AI briefing every weekday at that local time (needs an AI key)
     "magic_names": {},                  # {"<EA magic number>": "readable setup name"} for Accounts & EAs
     "jobs_files": [],                   # extra job files, imported read-only
     "jobs_python": "",                  # interpreter for "python" jobs whose file names none (default: SessionDesk's own)
