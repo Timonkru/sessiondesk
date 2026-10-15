@@ -3,8 +3,8 @@ import { api, on } from "../lib/api.js";
 import { h, clear, table, section, sparkline, price, pct, signed, dir, ago, clock, day, countdown, note, loading, errorBox } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
-  const left = h("div"), right = h("div");
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Markets"), h("span", { class: "meta", id: "ovMeta" })),
+  const left = h("div"), right = h("div"), meta = h("span", { class: "meta" });
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Markets"), meta),
     h("div", { class: "cols" }, left, right));
   left.appendChild(loading());
 
@@ -24,7 +24,7 @@ export async function render(root, _params, ctx) {
         { label: "", num: true, render: (r) => h("span", { class: "muted small" }, r.time ? ago(r.time) : "") },
       ], g.rows)));
     }
-    document.getElementById("ovMeta").textContent =
+    meta.textContent =
       `Yahoo quotes, delayed per exchange rules · updated ${clock(d.asof)}` + (d.missing && d.missing.length ? ` · no data: ${d.missing.join(", ")}` : "");
     ctx.setContext({ page: "Markets overview", groups: groups.map((g) => ({ group: g.title, rows: g.rows.map((r) => ({ name: r.label, symbol: r.symbol, last: r.price, change_pct: r.change_pct, change_bp: r.change_bp })) })) });
   };

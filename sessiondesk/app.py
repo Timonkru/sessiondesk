@@ -34,7 +34,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import deep, flows, jobs, macro, markets, movers, news, research, stocks, valuation
+from .features import deep, flows, jobs, levels, macro, markets, movers, news, research, risk, stocks, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -295,6 +295,48 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def get_broker():
         return await broker_view.overview(C())
 
+    @app.get("/api/book")
+    async def get_book():
+        ctx = C()
+        b = await broker_view.overview(ctx)
+        if not b.get("connected"):
+            return {"positions": [], "note": b.get("note")}
+        return await risk.book(ctx, [p for p in b.get("positions", []) if p.get("fresh", True)], b.get("accounts", []))
+
+    @app.get("/api/specs")
+    async def get_specs():
+        return await risk.specs(C())
+
+    @app.get("/api/fx/strength")
+    async def fx_strength():
+        ctx = C()
+        mt5 = ctx.hub.get("mt5")
+        quotes = {}
+        if mt5 and mt5.active():
+            try:
+                quotes = await mt5.broker_quotes()
+            except Exception:
+                quotes = {}
+
+        async def build():
+            return await risk.currency_strength(ctx, quotes)
+        return await ctx.cache.get("fx:strength", 60, build)
+
+    @app.get("/api/calendar/history")
+    async def calendar_history():
+        ctx = C()
+
+        async def build():
+            return await risk.event_history(ctx)
+        return await ctx.cache.get("cal:history", 3 * 3600, build)
+
+    @app.get("/api/levels")
+    async def get_levels():
+        ctx = C()
+        snap = await levels.snapshot(ctx)
+        snap["alerts"] = await ctx.db.run(ctx.db.alerts, 40, "level")
+        return snap
+
     # ------------------------------------------------------------------ jobs
     @app.get("/api/jobs")
     async def get_jobs():
@@ -515,6 +557,24 @@ def background(ctx) -> list:
     async def prune():
         await ctx.db.run(ctx.db.prune_news, 120)
 
+    alerter = levels.LevelAlerter(cooldown=600)
+    level_state = {"next": 0.0}
+
+    async def level_alerts():
+        if not ctx.settings.get("level_alerts", True) or time.time() < level_state["next"]:
+            return
+        prices = await levels.price_sources(ctx)
+        broker = any(q.get("source") == "broker" for q in prices.values())
+        level_state["next"] = time.time() + (5 if broker else 30)
+        files = levels.read_level_files(ctx.settings)["levels"]
+        for hit in alerter.check(prices, files, ctx.settings):
+            alert = {"id": hit["id"], "ts": hit["ts"], "kind": "level", "symbol": hit["symbol"],
+                     "title": f"{hit['symbol']} {'above' if hit['direction'] == 'up' else 'below'} {hit['label']} {hit['level']:g}",
+                     "body": f"{hit['asset']} at {hit['price']:g} crossed {hit['label']} {hit['level']:g} ({hit['src']}, price from {hit['source']}).",
+                     "data": hit}
+            if await ctx.db.run(ctx.db.add_alert, alert):
+                ctx.broker.publish("level", {"alert": alert})
+
     news_cfg = lambda k, d: (ctx.settings.get("news") or {}).get(k, d)  # noqa: E731
     return [
         warm_news(),
@@ -523,6 +583,7 @@ def background(ctx) -> list:
         every(lambda: max(600, news_cfg("research_minutes", 60) * 60), research_news, first_delay=60, name="research"),
         every(lambda: max(60, (ctx.settings.get("alerts") or {}).get("scan_minutes", 5) * 60), scan, first_delay=20, name="movers"),
         every(lambda: 86400, prune, first_delay=300, name="prune"),
+        every(lambda: 5, level_alerts, first_delay=25, name="levels"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
     ]

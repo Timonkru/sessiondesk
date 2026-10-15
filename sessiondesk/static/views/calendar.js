@@ -1,6 +1,6 @@
 // Economic calendar (merged sources, live actuals) + earnings calendar.
 import { api, on } from "../lib/api.js";
-import { h, clear, table, section, clock, day, countdown, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, table, section, clock, day, countdown, note, loading, errorBox, num, pct, dir } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
   let tab = "eco", level = localStorage.getItem("sd.calLevel") || "high", events = [];
@@ -45,7 +45,24 @@ export async function render(root, _params, ctx) {
       ], rows, { rowClass: (e) => (e.ts > now && e.ts - now < 1800 ? "hl" : "") })));
     }
     if (!keep.length) body.appendChild(note("No events at this level."));
+    body.appendChild(histBox);
     ctx.setContext({ page: "Economic calendar", events: keep.map((e) => ({ when_utc: new Date(e.ts * 1000).toISOString(), currency: e.currency, title: e.title, impact: e.impact, actual: e.actual, forecast: e.forecast, previous: e.previous, surprise: e.surprise })) });
+  };
+
+  // Reaction history: last releases of upcoming events (exported by the MT5 bridge) and how markets moved.
+  const histBox = h("div");
+  const loadHistory = async () => {
+    const d = await api("/api/calendar/history", { ttl: 600000 });
+    const evs = Object.values(d.events || {}).sort((a, b) => (a.currency + a.name).localeCompare(b.currency + b.name));
+    if (!evs.length) { clear(histBox, section("Reaction history", note(d.note || d.error || "No history available."))); return; }
+    clear(histBox, section("Reaction history of upcoming events", note(d.note),
+      ...evs.map((ev) => h("details", null,
+        h("summary", null, `${ev.currency} ${ev.name}  `, h("span", { class: "muted small" },
+          Object.entries(ev.avg_abs_move || {}).map(([a, v]) => `${a} ±${num(v, 2)}%`).join(" · ") || "no price reaction data")),
+        table([{ label: "Released", render: (r) => new Date(r.ts * 1000).toLocaleString([], { day: "2-digit", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) },
+          { label: "Actual", num: true, render: (r) => num(r.actual, 2) + (ev.unit || "") }, { label: "Forecast", num: true, render: (r) => (r.forecast == null ? "–" : num(r.forecast, 2) + (ev.unit || "")) },
+          { label: "Surprise", num: true, cls: (r) => (r.surprise > 0 ? "up" : r.surprise < 0 ? "down" : ""), render: (r) => (r.surprise == null ? "–" : (r.surprise > 0 ? "+" : "") + num(r.surprise, 2)) },
+          ...ev.markets.map((m) => ({ label: m + " 3h", num: true, cls: (r) => dir(r.moves[m]), render: (r) => (r.moves[m] == null ? "–" : pct(r.moves[m], 2)) }))], ev.releases)))));
   };
 
   const loadEarn = async () => {
@@ -68,6 +85,7 @@ export async function render(root, _params, ctx) {
   drawTabs();
   clear(body, loading());
   await loadEco();
+  loadHistory();
   const off = on("release", loadEco);
   const t1 = setInterval(() => tab === "eco" && drawEco(), 1000 * 15), t2 = setInterval(() => tab === "eco" && loadEco(), 60000);
   return () => { off(); clearInterval(t1); clearInterval(t2); };

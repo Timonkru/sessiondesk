@@ -61,6 +61,14 @@ DEFAULTS: dict = {
     "preferences": {},                  # {capability: [connector ids in preferred order]}
     "feeds": {},                        # user overrides of the RSS feed lists, see features/news.py
     "privacy": {"mask_accounts": True},
+    "level_files": [],                  # [{"title": "...", "path": "..."}] text files with levels (see features/levels.py)
+    "level_markets": ["DAX", "NQ", "DOW", "SPX", "GOLD"],   # markets on the ladder when no broker quotes cover them
+    "level_alerts": True,
+    "level_max_age_hours": 96,
+    "round_steps": {},                  # override round-number steps, e.g. {"DAX": 500}
+    "asset_patterns": {},               # extra broker-symbol patterns, e.g. {"DAX": ["DE40.CASH"]}
+    "scenario_drivers": ["NQ", "DAX"],
+    "scenario_shock_pct": -1.0,
     "magic_names": {},                  # {"<EA magic number>": "readable setup name"} for Accounts & EAs
     "jobs_files": [],                   # extra job files, imported read-only
     "jobs_python": "",                  # interpreter for "python" jobs whose file names none (default: SessionDesk's own)

@@ -6,6 +6,7 @@ const VIEWS = {
   overview: () => import("./views/overview.js"),
   stock: () => import("./views/stock.js"),
   watch: () => import("./views/watch.js"),
+  levels: () => import("./views/levels.js"),
   news: () => import("./views/news.js"),
   calendar: () => import("./views/calendar.js"),
   flows: () => import("./views/flows.js"),
@@ -52,7 +53,7 @@ async function route() {
     cleanup = (await mod.render(root, params, ctx)) || null;
   } catch (err) {
     console.error(err);
-    viewEl.appendChild(errorBox("This page failed to load: " + err.message));
+    if (seq === renderSeq) viewEl.appendChild(errorBox("This page failed to load: " + err.message));   // not on a page opened since
   }
 }
 
@@ -214,6 +215,11 @@ function wirePush() {
     const kind = alert.data && alert.data.pct > 0 ? "up" : "down";
     toast(alert.title, (alert.body || "").split(". ").slice(0, 2).join(". ").slice(0, 160), { kind, onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });
     notify("Unusual move: " + alert.title, (alert.body || "").slice(0, 180));
+  });
+  on("level", ({ alert }) => {
+    toast(alert.title, alert.body, { kind: (alert.data || {}).direction === "up" ? "up" : "down", onClick: () => ctx.go("#/levels") });
+    notify("Level: " + alert.title, alert.body);
+    beep("info");
   });
   on("alert_digest", ({ count, top }) => {
     toast(`${count} unusual moves today`, (top || []).join(" · "), { onClick: () => ctx.go("#/watch") });

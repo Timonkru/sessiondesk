@@ -11,8 +11,8 @@
 //| License: MIT                                                     |
 //+------------------------------------------------------------------+
 #property strict
-#property version     "1.00"
-#property description "Read-only data bridge for SessionDesk (account, positions, EAs, quotes, deals, calendar)."
+#property version     "1.10"
+#property description "Read-only data bridge for SessionDesk (account, positions, EAs, quotes, specs, deals, calendar + history)."
 
 input int  InpFastSeconds      = 2;     // positions / account / calendar-change check (seconds)
 input int  InpSlowSeconds      = 60;    // full calendar, deals, running EAs (seconds)
@@ -20,7 +20,7 @@ input int  InpDealDays         = 30;    // closed-deal history to export (days)
 input int  InpMaxQuotes        = 200;   // max Market Watch symbols exported
 input bool InpExportCalendar   = true;  // only one terminal needs this; harmless if several do
 
-#define BRIDGE_VERSION "1.00"
+#define BRIDGE_VERSION "1.10"
 string   g_folder = "SessionDesk\\";
 ulong    g_calendar_change = 0;
 datetime g_last_slow = 0;
@@ -95,7 +95,7 @@ void ExportPositions()
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
    long offset = ServerOffset();
    string body = Header("positions");
-   body += "ticket\tsymbol\tside\tvolume\topen_price\topen_time_utc\tsl\ttp\tprice\tprofit\tswap\tmagic\tcomment\trisk_to_stop\tdigits\n";
+   body += "ticket\tsymbol\tside\tvolume\topen_price\topen_time_utc\tsl\ttp\tprice\tprofit\tswap\tmagic\tcomment\trisk_to_stop\tdigits\tmoney_per_pct\n";
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -113,9 +113,42 @@ void ExportPositions()
             + "\t" + D(PositionGetDouble(POSITION_PRICE_CURRENT), digits)
             + "\t" + D(PositionGetDouble(POSITION_PROFIT), 2) + "\t" + D(PositionGetDouble(POSITION_SWAP), 2)
             + "\t" + IntegerToString(PositionGetInteger(POSITION_MAGIC)) + "\t" + Clean(PositionGetString(POSITION_COMMENT))
-            + "\t" + D(RiskToStop(sym, type, vol, open, sl), 2) + "\t" + IntegerToString(digits) + "\n";
+            + "\t" + D(RiskToStop(sym, type, vol, open, sl), 2) + "\t" + IntegerToString(digits)
+            + "\t" + D(MoneyPerPercent(sym, vol, PositionGetDouble(POSITION_PRICE_CURRENT)), 2) + "\n";
    }
    Publish("positions_" + IntegerToString(login) + ".tsv", body);
+}
+
+//--- account-currency P/L of a 1 % move in the symbol for the given volume (sensitivity for scenarios)
+double MoneyPerPercent(string symbol, double volume, double price)
+{
+   if(price <= 0) return 0;
+   double pnl = 0;
+   if(!OrderCalcProfit(ORDER_TYPE_BUY, symbol, volume, price, price * 1.01, pnl)) return 0;
+   return MathAbs(pnl);
+}
+
+void ExportSpecs()
+{
+   long login = AccountInfoInteger(ACCOUNT_LOGIN);
+   string body = Header("specs");
+   body += "symbol\tspread_points\tpoint\tdigits\tmoney_per_unit\tcontract_size\tvolume_min\tvolume_step\tswap_long\tswap_short\tswap_mode\ttriple_day\tcurrency_profit\n";
+   int n = SymbolsTotal(true);
+   for(int i = 0; i < n && i < InpMaxQuotes; i++)
+   {
+      string sym = SymbolName(i, true);
+      double tick_value = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+      double tick_size = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      double per_unit = tick_size > 0 ? tick_value / tick_size : 0;     // account money per 1.0 price move per lot
+      body += sym + "\t" + IntegerToString(SymbolInfoInteger(sym, SYMBOL_SPREAD))
+            + "\t" + DoubleToString(SymbolInfoDouble(sym, SYMBOL_POINT), 10) + "\t" + IntegerToString(SymbolInfoInteger(sym, SYMBOL_DIGITS))
+            + "\t" + D(per_unit, 6) + "\t" + D(SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE), 2)
+            + "\t" + D(SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN), 2) + "\t" + D(SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP), 2)
+            + "\t" + D(SymbolInfoDouble(sym, SYMBOL_SWAP_LONG), 4) + "\t" + D(SymbolInfoDouble(sym, SYMBOL_SWAP_SHORT), 4)
+            + "\t" + IntegerToString(SymbolInfoInteger(sym, SYMBOL_SWAP_MODE)) + "\t" + IntegerToString(SymbolInfoInteger(sym, SYMBOL_SWAP_ROLLOVER3DAYS))
+            + "\t" + SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT) + "\n";
+   }
+   Publish("specs_" + IntegerToString(login) + ".tsv", body);
 }
 
 void ExportEAs()
@@ -235,6 +268,45 @@ void ExportCalendar()
    Publish("calendar.tsv", body);
 }
 
+//--- last 10 releases of every medium/high event due in the next 36 h (for the reaction history)
+void ExportCalendarHistory()
+{
+   if(!InpExportCalendar) return;
+   long offset = ServerOffset();
+   datetime now = TimeTradeServer();
+   MqlCalendarValue upcoming[];
+   if(CalendarValueHistory(upcoming, now, now + 36 * 3600) <= 0) return;
+   string body = Header("calhist");
+   body += "event_id\tcurrency\tname\ttime_utc\tactual\tforecast\tprevious\tunit\timportance\n";
+   ulong done[];
+   for(int i = 0; i < ArraySize(upcoming); i++)
+   {
+      MqlCalendarEvent ev;
+      MqlCalendarCountry c;
+      if(!CalendarEventById(upcoming[i].event_id, ev)) continue;
+      if(ev.importance < CALENDAR_IMPORTANCE_MODERATE) continue;
+      bool seen = false;
+      for(int k = 0; k < ArraySize(done); k++) if(done[k] == ev.id) { seen = true; break; }
+      if(seen) continue;
+      int m = ArraySize(done);
+      ArrayResize(done, m + 1);
+      done[m] = ev.id;
+      if(!CalendarCountryById(ev.country_id, c)) continue;
+      MqlCalendarValue hist[];
+      int got = CalendarValueHistoryByEvent(ev.id, hist, now - 3 * 365 * 86400, now);
+      int digits = (int)ev.digits;
+      for(int j = MathMax(0, got - 10); j < got; j++)
+      {
+         if(hist[j].actual_value == LONG_MIN) continue;
+         body += IntegerToString((long)ev.id) + "\t" + c.currency + "\t" + Clean(ev.name)
+               + "\t" + IntegerToString((long)hist[j].time - offset)
+               + "\t" + CalValue(hist[j].actual_value, digits) + "\t" + CalValue(hist[j].forecast_value, digits)
+               + "\t" + CalValue(hist[j].prev_value, digits) + "\t" + Unit(ev, c) + "\t" + IntegerToString((int)ev.importance) + "\n";
+      }
+   }
+   Publish("calhist.tsv", body);
+}
+
 //--- cheap change probe: true when MetaQuotes published anything new (e.g. an actual value)
 bool CalendarChanged()
 {
@@ -253,6 +325,7 @@ int OnInit()
    EventSetTimer(MathMax(1, InpFastSeconds));
    CalendarChanged();            // arm the change id
    ExportAccount(); ExportPositions(); ExportQuotes(); ExportEAs(); ExportDeals(); ExportCalendar();
+   ExportSpecs(); ExportCalendarHistory();
    g_last_slow = TimeLocal();
    Print("SessionDesk bridge ", BRIDGE_VERSION, " started (read-only).");
    return INIT_SUCCEEDED;
@@ -271,6 +344,8 @@ void OnTimer()
       ExportEAs();
       ExportDeals();
       ExportCalendar();
+      ExportSpecs();
+      ExportCalendarHistory();
       g_last_slow = TimeLocal();
    }
 }

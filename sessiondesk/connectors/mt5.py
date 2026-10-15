@@ -26,8 +26,9 @@ from pathlib import Path
 
 from .base import Connector, Field, stable_id
 
-FRESH = {"account": 30, "positions": 30, "quotes": 30, "eas": 300, "deals": 900, "calendar": 900}
-LEGACY_FRESH = {"status": 120, "pos": 120, "px": 120, "deals": 900, "calendar": 900}
+FRESH = {"account": 30, "positions": 30, "quotes": 30, "eas": 300, "deals": 900, "calendar": 900, "specs": 3600, "calhist": 3600}
+LEGACY_FRESH = {"status": 120, "pos": 120, "px": 120, "deals": 900, "calendar": 900, "sym": 3600, "calhist": 3600}
+WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 IMPORTANCE = {1: "low", 2: "medium", 3: "high"}
 STATUS_CORE = {"balance", "equity", "currency", "server", "connected", "algo_terminal", "algo_account", "margin",
                "free_margin", "profit", "company", "leverage"}
@@ -192,7 +193,7 @@ class MT5Bridge(Connector):
     name = "MetaTrader 5 (bridge EA)"
     tier = "free"
     kind = "broker"
-    capabilities = ("account", "positions", "eas", "calendar", "broker_quotes", "deals")
+    capabilities = ("account", "positions", "eas", "calendar", "broker_quotes", "deals", "specs", "calhist")
     fields = (Field("folder", "Export folder(s)", secret=False, required=False,
                     help="Where the exporter writes. Several folders separated by ';'. Default: MT5 common folder \\Files\\SessionDesk.",
                     placeholder=default_folder()),)
@@ -282,7 +283,7 @@ class MT5Bridge(Connector):
                             "price": num(r.get("price")), "profit": num(r.get("profit")), "swap": num(r.get("swap")),
                             "magic": r.get("magic"), "comment": r.get("comment"),
                             "risk_to_stop": num(r.get("risk_to_stop")), "manual": r.get("magic") in ("0", ""),
-                            "fresh": f["fresh"], "age": f["age"]})
+                            "money_per_pct": num(r.get("money_per_pct")), "fresh": f["fresh"], "age": f["age"]})
         for login, data in self._old("pos", "pos"):
             if login in seen:
                 continue
@@ -362,3 +363,62 @@ class MT5Bridge(Connector):
                 seen.add(key)
                 unique.append(r)
         return parse_mt5_calendar(unique, start, end)
+
+    async def specs(self) -> list[dict]:
+        """Instrument sheet per account: spread, money per point, swaps, triple-swap day, sizes."""
+        hide, out, seen = self._hide(), [], set()
+        for f in self._new("specs"):
+            seen.add(f["login"])
+            for r in f["rows"]:
+                point = num(r.get("point")) or 0
+                per_unit = num(r.get("money_per_unit"))
+                out.append({"account": mask(f["login"], hide), "symbol": r.get("symbol"),
+                            "spread_points": num(r.get("spread_points")),
+                            "spread_price": (num(r.get("spread_points")) or 0) * point if point else None,
+                            "money_per_unit": per_unit, "contract": num(r.get("contract_size")),
+                            "min_lot": num(r.get("volume_min")), "lot_step": num(r.get("volume_step")),
+                            "swap_long": num(r.get("swap_long")), "swap_short": num(r.get("swap_short")),
+                            "swap_mode": r.get("swap_mode"), "triple_day": WEEKDAYS[int(num(r.get("triple_day")) or 0) % 7],
+                            "currency": r.get("currency_profit"), "fresh": f["fresh"]})
+        for login, data in self._old("sym", "sym"):
+            if login in seen:
+                continue
+            for f in data["rows"]:
+                if len(f) < 12:
+                    continue
+                out.append({"account": mask(login, hide), "symbol": f[0], "spread_points": num(f[1]), "spread_bp": num(f[2]),
+                            "money_per_unit": num(f[3]), "swap_long": num(f[4]), "swap_short": num(f[5]), "swap_mode": f[6],
+                            "swap_long_money": num(f[7]), "swap_short_money": num(f[8]),
+                            "triple_day": WEEKDAYS[int(num(f[9]) or 0) % 7], "min_lot": num(f[10]), "contract": num(f[11]),
+                            "currency": data["head"][3] if len(data["head"]) > 3 else "", "fresh": data["fresh"]})
+        return out
+
+    async def calhist(self) -> dict[str, dict]:
+        """{event key: {currency, name, unit, releases: [{ts, actual, forecast, previous, surprise}]}}"""
+        events: dict[str, dict] = {}
+
+        def add(key, currency, name, unit, ts, actual, forecast, previous):
+            ts, a, fc = num(ts), num(actual), num(forecast)
+            if ts is None or a is None:
+                return
+            ev = events.setdefault(key, {"currency": currency, "name": name.replace(" [time tentative]", ""), "unit": unit, "releases": []})
+            if any(r["ts"] == ts for r in ev["releases"]):
+                return
+            ev["releases"].append({"ts": ts, "actual": a, "forecast": fc, "previous": num(previous),
+                                   "surprise": a - fc if fc is not None else None})
+        for folder in self.folders():
+            path = folder / "calhist.tsv"
+            new = read_tsv(path)
+            if new:
+                for r in new["rows"]:
+                    add(f"{r.get('currency')}|{r.get('name')}", r.get("currency", ""), r.get("name", ""), r.get("unit", ""),
+                        r.get("time_utc"), r.get("actual"), r.get("forecast"), r.get("previous"))
+                continue
+            old = read_legacy(path)
+            if old:
+                for f in old["rows"]:
+                    if len(f) >= 8:
+                        add(f"{f[1]}|{f[2]}", f[1], f[2], f[7], f[3], f[4], f[5], f[6])
+        for ev in events.values():
+            ev["releases"].sort(key=lambda r: -r["ts"])
+        return events
