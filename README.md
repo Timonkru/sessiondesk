@@ -16,16 +16,20 @@ key**. Nothing is sent anywhere except to the sources you enable.
 
 | Page | What it does |
 |---|---|
+| **Today** | Your trading day on one page: accounts with a prop-rule meter (daily loss, own stop, open slots), rule flags, your own session schedule with release collisions marked, next releases and forced flows, an AI briefing written from computed facts, what changed since you last looked, one-line notes. Schedule and rules live in your local settings. |
 | **Markets** | Indices, index futures, US yields (moves in basis points), FX, commodities, crypto, volatility, US sectors - each with today's path. Next high-impact releases, unusual moves and the squawk wire beside it. |
-| **Stock** | Quote and chart (1 day to max), key data, valuation multiples against the peer median with plausibility checks, a reverse DCF you can steer (*what growth does today's price assume?*), analyst consensus, merged news, SEC filings. |
+| **Levels** | Ladder of the nearest levels above and below each price: levels from your own text files (e.g. options-derived levels), round numbers, previous day and overnight range. Alerts when a price crosses a level; stale level files are ignored. |
+| **Indices & breadth** | S&P 500, Nasdaq-100, DAX 40, Dow 30: share of members up, above their 50/200-day averages, at new highs/lows, a breadth line next to the index with a divergence flag; who moves the index (Dow in points, cap-weighted indices by weight x move, with a check against the index move); bottom-up forward P/E with its own daily history; the weekly FactSet forward P/E for the S&P 500. |
+| **Stock** | Quote and chart (1 day to max) and twelve tabs: overview, financial statements, earnings history with price reactions, estimates and analysts, valuation (multiples against the peer median with plausibility checks, a reverse DCF you can steer: *what growth does today's price assume?*), ownership and short interest, options (expected move, put/call, max pain), performance and risk, peers, dividends, news, SEC filings. Indices, FX, futures and crypto get the tabs that fit them. |
 | **Watchlist & movers** | Your watchlist plus a scan of the S&P 500, Nasdaq-100 and DAX 40 every few minutes. A move is flagged when it is large in percent **and** relative to the stock's own volatility. Each alert is explained from computed facts: how much the market and sector explain (beta), what is stock-specific, earnings timing, headlines that name the company. |
 | **News** | Live headlines with transparent rule-based impact triage (central banks, top-tier data, geopolitics, tariffs, market structure) and full-text search over everything received since install. |
 | **Calendar** | Economic calendar merged from all active sources, countdown to the next release, warnings 30/5/1 minutes before, and "burst mode" around high-impact events: the actual value is pushed as soon as a source has it (MetaTrader 5 bridge, TradingEconomics, Finnhub, FMP, or the squawk headline). Earnings calendar. |
 | **Forced flows** | Dates on which someone must trade regardless of price: index rebalances (S&P, Nasdaq-100, MSCI, FTSE, STOXX/DAX, Russell), option and VIX expiries, futures roll, month/quarter end, Tokyo fix - computed from published rules, each with a link to verify. |
 | **Research** | Feeds from research blogs and central banks, a clean reader view (text only, no trackers), a reading list, AI summaries. |
-| **Macro** | Treasury curve and spreads, Fed funds path from futures, VIX term structure vs realized volatility, risk-appetite ratios, CFTC positioning. |
-| **Accounts & EAs** | Read-only: balances, open positions with money at risk to the stop, which EA runs on which chart, closed trades per EA (magic number). |
+| **Macro** | Treasury curve and spreads, Fed funds path from futures, VIX term structure vs realized volatility, risk-appetite ratios, put/call ratios (SPY, QQQ), CFTC positioning. |
+| **Accounts & EAs** | Read-only: balances, open positions with money at risk to the stop, which EA runs on which chart, closed trades per EA (magic number), book risk (correlated positions, scenario moves), currency strength, contract specs. |
 | **Jobs** | Run your own scripts (`.bat`, `.cmd`, `.ps1`, `.py`, `.sh`, any command) by click, on a schedule or as a service; live output; copy a job's output file to the clipboard; workflows that chain jobs. |
+| **Journal** | Closed positions with net result, initial risk and R multiple, a note per trade, statistics per setup (EA) in R. |
 | **AI everywhere** | Type a question in the search bar on any page and the assistant answers about what that page shows. Explain an alert, summarize an article, or ask the built-in help how to set something up. |
 
 ## Quick start

@@ -7,7 +7,8 @@ browser (static/, vanilla JS modules, no build step)
 sessiondesk/app.py  FastAPI: routes, security guard, background loops
    |
    +-- features/   one module per page: turns connector data into what the page shows
-   |     markets  stocks  valuation  movers  news  calendar  flows  research  macro  broker  jobs
+   |     markets  stocks  deep  valuation  movers  news  calendar  flows  research  macro  broker  jobs
+   |     today  levels  risk  journal  indices  assets  universe  feeds
    +-- connectors/ one class per outside system, normalized shapes (see base.py)
    |     yahoo  rss  public (fred, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
    |     alphavantage, tradingeconomics, alpaca)  registry.py (the list + planned entries)

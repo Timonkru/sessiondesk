@@ -1,4 +1,4 @@
-// Macro: US curve, Fed path, volatility structure, risk appetite ratios, COT positioning.
+// Macro: US curve, Fed path, volatility structure, risk appetite ratios, put/call, COT positioning.
 import { api } from "../lib/api.js";
 import { lineChart, bars } from "../lib/chart.js";
 import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBox } from "../lib/ui.js";
@@ -6,12 +6,21 @@ import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBo
 export async function render(root, _params, ctx) {
   const a = h("div"), b = h("div");
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Macro")), h("div", { class: "cols" }, a, b));
-  const rates = h("div", null, loading()), fed = h("div", null, loading()), vol = h("div", null, loading()), risk = h("div", null, loading()), cot = h("div", null, loading());
+  const rates = h("div", null, loading()), fed = h("div", null, loading()), vol = h("div", null, loading()), risk = h("div", null, loading()), pc = h("div", null, loading()), cot = h("div", null, loading());
   a.append(section("US Treasury curve", rates), section("Fed funds path (futures)", fed));
-  b.append(section("Volatility", vol), section("Risk appetite", risk), section("Positioning (COT)", cot));
+  b.append(section("Volatility", vol), section("Risk appetite", risk), section("Put/call (SPY, QQQ options)", pc), section("Positioning (COT)", cot));
   const facts = {};
   const push = () => ctx.setContext({ page: "Macro", ...facts });
 
+  // put/call reads option chains (slow on first load): fill it in on its own so the other panels do not wait
+  api("/api/macro/putcall", { ttl: 120000 }).then((o) => {
+    if (o.error) { clear(pc, errorBox(o.error)); return; }
+    facts.put_call = o.rows;
+    clear(pc, table([{ label: "ETF", render: (x) => x.symbol }, { label: "P/C volume", num: true, render: (x) => num(x.pc_volume, 2) },
+      { label: "P/C open interest", num: true, render: (x) => num(x.pc_oi, 2) },
+      { label: "Expiries", render: (x) => h("span", { class: "muted small" }, (x.expiries || []).join(", ")) }], o.rows), note(o.note));
+    push();
+  });
   const [r, f, v, k, c] = await Promise.all(["rates", "fedpath", "vol", "risk", "cot"].map((p) => api("/api/macro/" + p, { ttl: 120000 })));
   if (r.error) clear(rates, errorBox(r.error)); else {
     facts.curve = r.curve; facts.spreads_bp = r.spreads_bp; facts.rates_extras = r.extras;

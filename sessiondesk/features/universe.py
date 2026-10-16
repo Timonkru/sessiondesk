@@ -7,8 +7,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1] / "data" / "universes"
 
-UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dax40": "DAX 40"}
-BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dax40": "^GDAXI"}
+UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dax40": "DAX 40", "dow30": "Dow 30"}
+BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dax40": "^GDAXI", "dow30": "^DJI"}
 
 # GICS sector (S&P 500 file) / ICB industry (Nasdaq-100 file) -> SPDR sector ETF
 SECTOR_ETF = {

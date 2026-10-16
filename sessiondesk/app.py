@@ -34,7 +34,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import deep, flows, jobs, levels, macro, markets, movers, news, research, risk, stocks, today, valuation
+from .features import deep, flows, indices, jobs, levels, macro, markets, movers, news, research, risk, stocks, today, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -284,9 +284,18 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             await C().db.run(C().db.save_article, body["url"], body.get("title", ""), body.get("source", ""))
         return {"saved": await C().db.run(C().db.saved)}
 
+    @app.get("/api/indices/{key}")
+    async def get_index(key: str):
+        ctx = C()
+
+        async def build():
+            return await indices.index_view(ctx, key)
+        return await ctx.cache.get(f"idxview:{key}", 120, build)
+
     @app.get("/api/macro/{panel}")
     async def get_macro(panel: str):
-        fn = {"rates": macro.rates, "fedpath": macro.fed_path, "vol": macro.vol, "risk": macro.risk_ratios, "cot": macro.cot}.get(panel)
+        fn = {"rates": macro.rates, "fedpath": macro.fed_path, "vol": macro.vol, "risk": macro.risk_ratios, "cot": macro.cot,
+              "putcall": indices.putcall, "factset": indices.factset}.get(panel)
         if not fn:
             return {"error": "unknown panel"}
         return await fn(C())
@@ -682,6 +691,11 @@ def background(ctx) -> list:
         book_state["open"] = current
         await journal.sync(ctx, b)
 
+    async def warm_indices():
+        """Member profiles for index valuation are slow the first time: build them in the background."""
+        for key in ("dax40", "dow30", "nasdaq100"):
+            await indices.index_view(ctx, key)
+
     async def scheduled_briefing():
         when = ctx.settings.get("briefing_time")
         if not when:
@@ -722,6 +736,7 @@ def background(ctx) -> list:
         every(lambda: 86400, prune, first_delay=300, name="prune"),
         every(lambda: 5, level_alerts, first_delay=25, name="levels"),
         every(lambda: 10, watch_positions, first_delay=12, name="positions"),
+        every(lambda: 3600, warm_indices, first_delay=180, name="indices"),
         every(lambda: 60, scheduled_briefing, first_delay=90, name="briefing"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),

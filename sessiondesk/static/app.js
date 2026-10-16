@@ -10,6 +10,7 @@ const VIEWS = {
   stock: () => import("./views/stock.js"),
   watch: () => import("./views/watch.js"),
   levels: () => import("./views/levels.js"),
+  indices: () => import("./views/indices.js"),
   news: () => import("./views/news.js"),
   calendar: () => import("./views/calendar.js"),
   flows: () => import("./views/flows.js"),

@@ -1,4 +1,4 @@
-# source: Wikipedia, fetched 2026-10-11 - re-run scripts/update_universes.py after index reviews
+# source: Wikipedia, fetched 2026-10-15 - re-run scripts/update_universes.py after index reviews
 symbol,name,sector,industry
 MMM,3M,Industrials,Industrial Conglomerates
 AOS,A. O. Smith,Industrials,Building Products
@@ -306,7 +306,7 @@ MAS,Masco,Industrials,Building Products
 MA,Mastercard,Financials,Transaction & Payment Processing Services
 MKC,McCormick & Company,Consumer Staples,Packaged Foods & Meats
 MCD,McDonald's,Consumer Discretionary,Restaurants
-MCK,McKesson Corporation,Health Care,Health Care Distributors
+MCK,McKesson,Health Care,Health Care Distributors
 MDT,Medtronic,Health Care,Health Care Equipment
 MRK,Merck & Co.,Health Care,Pharmaceuticals
 META,Meta Platforms,Communication Services,Interactive Media & Services

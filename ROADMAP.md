@@ -1,7 +1,8 @@
 # Roadmap
 
-Status 13 Oct 2026: v0.1 - all pages working on free data, 43 offline tests green, bridge compiles
-(0 errors, 0 warnings). Open items in priority order.
+Status 16 Oct 2026: v0.1 - all pages working on free data (incl. Today, Levels, Indices & breadth,
+Journal, the twelve-tab instrument page), 72 offline tests green, bridge v1.10 compiles (0 errors,
+0 warnings). Open items in priority order.
 
 ## Verify what exists
 

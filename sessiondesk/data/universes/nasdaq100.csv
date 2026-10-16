@@ -1,4 +1,4 @@
-# source: Wikipedia, fetched 2026-10-11 - re-run scripts/update_universes.py after index reviews
+# source: Wikipedia, fetched 2026-10-15 - re-run scripts/update_universes.py after index reviews
 symbol,name,sector,industry
 ADBE,Adobe Inc.,Technology,Software
 AMD,Advanced Micro Devices,Technology,Semiconductors

@@ -1,0 +1,32 @@
+# source: Wikipedia, fetched 2026-10-15 - re-run scripts/update_universes.py after index reviews
+symbol,name,sector,industry
+AAPL,Apple Inc.,Information Technology,"Technology Hardware, Storage & Peripherals"
+AMGN,Amgen,Health Care,Biotechnology
+AMZN,Amazon,Consumer Discretionary,Broadline Retail
+AXP,American Express,Financials,Consumer Finance
+BA,Boeing,Industrials,Aerospace & Defense
+CAT,Caterpillar Inc.,Industrials,Construction Machinery & Heavy Transportation Equipment
+CRM,Salesforce,Information Technology,Application Software
+CSCO,Cisco,Information Technology,Communications Equipment
+CVX,Chevron Corporation,Energy,Integrated Oil & Gas
+DIS,Walt Disney Company (The),Communication Services,Movies & Entertainment
+GS,Goldman Sachs,Financials,Investment Banking & Brokerage
+HD,Home Depot (The),Consumer Discretionary,Home Improvement Retail
+HON,Honeywell Technologies,Industrials,Industrial Conglomerates
+IBM,IBM,Information Technology,IT Consulting & Other Services
+JNJ,Johnson & Johnson,Health Care,Pharmaceuticals
+JPM,JPMorgan Chase,Financials,Diversified Banks
+KO,Coca-Cola Company (The),Consumer Staples,Soft Drinks & Non-alcoholic Beverages
+MCD,McDonald's,Consumer Discretionary,Restaurants
+MMM,3M,Industrials,Industrial Conglomerates
+MRK,Merck & Co.,Health Care,Pharmaceuticals
+MSFT,Microsoft,Information Technology,Systems Software
+NKE,"Nike, Inc.",Consumer Discretionary,"Apparel, Accessories & Luxury Goods"
+NVDA,Nvidia,Information Technology,Semiconductors
+PG,Procter & Gamble,Consumer Staples,Personal Care Products
+SHW,Sherwin-Williams,Materials,Specialty Chemicals
+TRV,Travelers Companies (The),Financials,Property & Casualty Insurance
+UNH,UnitedHealth Group,Health Care,Managed Health Care
+V,Visa Inc.,Financials,Transaction & Payment Processing Services
+VZ,Verizon,Communication Services,Integrated Telecommunication Services
+WMT,Walmart,Consumer Staples,Consumer Staples Merchandise Retail

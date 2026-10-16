@@ -7,3 +7,4 @@ beautifulsoup4>=4.12
 yfinance>=0.2.50
 holidays>=0.50
 anthropic>=0.60
+pypdf>=4.0

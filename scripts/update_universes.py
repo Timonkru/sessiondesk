@@ -36,6 +36,14 @@ def col(df, name) -> str:
     return next(c for c in df.columns if name.lower() in str(c).lower())
 
 
+DOW30 = ["AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK", "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT"]   # membership as of 2026-10-15
+
+
+def rows_of(name: str) -> list[dict]:
+    lines = [ln for ln in (OUT / f"{name}.csv").read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
+    return list(csv.DictReader(lines))
+
+
 def write(name: str, rows: list[dict]) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{name}.csv"
@@ -66,6 +74,11 @@ def main() -> int:
         sector_col = next((c for c in dx.columns if "sector" in str(c).lower()), None)
         rows.append({"symbol": sym, "name": r[col(dx, "Company")], "sector": r[sector_col] if sector_col else "", "industry": ""})
     write("dax40", rows)
+
+    # Wikipedia no longer carries a parseable Dow table: the 30 members are maintained here (changes are rare and announced).
+    sp = {r["symbol"]: r for r in rows_of("sp500")}
+    write("dow30", [{"symbol": t, "name": sp.get(t, {}).get("name", t), "sector": sp.get(t, {}).get("sector", ""),
+                     "industry": sp.get(t, {}).get("industry", "")} for t in DOW30])
     return 0
 
 
