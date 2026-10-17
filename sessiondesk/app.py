@@ -137,6 +137,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
                 "data_dir": str(ctx.data_dir), "ai_provider": ctx.settings.get("ai.provider"),
                 "ai_ready": bool(assist.pick_provider(ctx) and assist.pick_provider(ctx).active())}
 
+    @app.get("/api/system")
+    async def get_system():
+        from .features import system
+        return await system.snapshot(C())
+
     @app.get("/api/stream")
     async def stream(since: int = 0):
         return StreamingResponse(C().broker.stream(since), media_type="text/event-stream",
@@ -643,14 +648,25 @@ def market_hours(now: float | None = None) -> bool:
 
 def background(ctx) -> list:
     async def every(seconds_fn, fn, *, first_delay: float = 0.0, name: str = ""):
+        stat = ctx.extras.setdefault("loops", {}).setdefault(name or fn.__name__, {
+            "runs": 0, "errors": 0, "first_delay": first_delay, "registered": time.time()})
         await asyncio.sleep(first_delay)
         while True:
+            stat["interval"] = seconds_fn()
+            stat["last_start"] = time.time()
             try:
                 await fn()
+                stat["last_ok"] = time.time()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                stat["errors"] += 1
+                stat["last_error"] = f"{type(exc).__name__}: {exc}"
+                stat["last_error_ts"] = time.time()
                 ctx.extras.setdefault("loop_errors", {})[name] = f"{dt.datetime.now():%H:%M:%S} {type(exc).__name__}: {exc}"
+            stat["runs"] += 1
+            stat["last_end"] = time.time()
+            stat["duration"] = stat["last_end"] - stat["last_start"]
             await asyncio.sleep(seconds_fn())
 
     async def warm_news():

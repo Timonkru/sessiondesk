@@ -129,6 +129,12 @@ class DB:
             r["group"] = r.pop("grp")
         return rows
 
+    def count_news(self) -> int:
+        try:
+            return int(self._exec("SELECT COUNT(*) AS n FROM news", [])[0]["n"])
+        except (sqlite3.OperationalError, IndexError):
+            return 0
+
     def prune_news(self, keep_days: int = 120) -> None:
         cutoff = int(time.time()) - keep_days * 86400
         with self._lock:

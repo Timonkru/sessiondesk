@@ -31,6 +31,7 @@ key**. Nothing is sent anywhere except to the sources you enable.
 | **Jobs** | Run your own scripts (`.bat`, `.cmd`, `.ps1`, `.py`, `.sh`, any command) by click, on a schedule or as a service; live output; copy a job's output file to the clipboard; workflows that chain jobs. |
 | **Journal** | Closed positions with net result, initial risk and R multiple, a note per trade, statistics per setup (EA) in R. |
 | **Your own pages** | A Python file in `~/.sessiondesk/extensions/` becomes a page in the navigation: tables, lists, key figures and an input line, rendered safely and with AI support. Private logic stays on your machine. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md). |
+| **System** | Is everything doing its job? Background loops, each source's last success and error, feeds, calendar sources, broker export age, jobs, extensions, level files - condensed into one problem list; a counter in the navigation shows when something needs a look. |
 | **AI everywhere** | Type a question in the search bar on any page and the assistant answers about what that page shows. Explain an alert, summarize an article, or ask the built-in help how to set something up. |
 
 ## Quick start

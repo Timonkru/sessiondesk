@@ -24,6 +24,7 @@ sends, modifies or cancels an order.
 from __future__ import annotations
 
 import asyncio
+import time
 import hashlib
 from dataclasses import dataclass, field
 from typing import Any
@@ -149,6 +150,16 @@ class Hub:
         self.ctx = ctx
         self.connectors = {c.id: c for c in connectors}
         self.planned = planned or []
+        self.health: dict[str, dict] = {}         # per connector: last success / last error (System page)
+
+    def mark(self, cid: str, error: str | None = None) -> None:
+        h = self.health.setdefault(cid, {"ok": 0, "errors": 0})
+        if error is None:
+            h["ok"] += 1
+            h["last_ok"] = time.time()
+        else:
+            h["errors"] += 1
+            h["last_error"], h["last_error_ts"] = error[:300], time.time()
 
     def get(self, cid: str) -> Connector | None:
         return self.connectors.get(cid)
@@ -175,8 +186,10 @@ class Hub:
                 data = await getattr(conn, method)(*args, **kwargs)
             except Exception as exc:
                 errors.append(f"{conn.id}: {exc}")
+                self.mark(conn.id, f"{method}: {exc}")
                 continue
             if data:
+                self.mark(conn.id)
                 return {"data": data, "source": conn.id}
             errors.append(f"{conn.id}: empty")
         return {"error": "; ".join(errors) or f"no active connector for '{capability}'"}
@@ -187,9 +200,12 @@ class Hub:
 
         async def one(conn):
             try:
-                return conn.id, await getattr(conn, method)(*args, **kwargs)
+                res = await getattr(conn, method)(*args, **kwargs)
             except Exception as exc:
+                self.mark(conn.id, f"{method}: {type(exc).__name__}: {exc}")
                 return conn.id, {"error": f"{type(exc).__name__}: {exc}"}
+            self.mark(conn.id, f"{method}: {res['error']}" if isinstance(res, dict) and res.get("error") else None)
+            return conn.id, res
         pairs = await asyncio.gather(*(one(c) for c in conns))
         return dict(pairs)
 

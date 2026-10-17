@@ -21,6 +21,7 @@ const VIEWS = {
   settings: () => import("./views/settings.js"),
   help: () => import("./views/help.js"),
   ext: () => import("./views/ext.js"),
+  system: () => import("./views/system.js"),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -278,6 +279,19 @@ async function loadExtensions() {
 }
 loadExtensions().then(markNav);
 window.addEventListener("sd:extensions", () => loadExtensions().then(markNav));   // fired after a reload in Settings
+
+// Problem counter in the nav footer (System page); refreshed every 2 minutes and whenever the System page loads.
+function showSystem(c) {
+  const el = $("sysState");
+  const n = (c && (c.error || 0) + (c.warn || 0)) || 0;
+  el.textContent = n ? `⚠ ${n} · ` : "";
+  el.className = c && c.error ? "down" : "warn";
+  el.title = n ? `${c.error} errors, ${c.warn} warnings - open System` : "";
+}
+const pollSystem = async () => { const d = await api("/api/system", { fresh: true }); if (!d.error) showSystem(d.counts); };
+window.addEventListener("sd:system", (e) => showSystem(e.detail));
+setTimeout(pollSystem, 20000);
+setInterval(pollSystem, 120000);
 
 window.addEventListener("hashchange", route);
 connect((live) => { const c = $("conn"); c.textContent = live ? "live" : "offline"; c.className = live ? "live" : "off"; });
