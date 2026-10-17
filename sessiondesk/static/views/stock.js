@@ -2,7 +2,7 @@
 // Equities get the full set (financials, earnings, street, valuation, ownership, options ...);
 // indices, FX, futures and crypto get the tabs that make sense for them.
 import { api } from "../lib/api.js";
-import { lineChart } from "../lib/chart.js";
+import { lineChart, candleChart } from "../lib/chart.js";
 import { h, clear, price, pct, big, num, ratio, dir, stamp, note, loading, errorBox } from "../lib/ui.js";
 import * as T from "./stock_tabs.js";
 
@@ -70,12 +70,15 @@ export async function render(root, params, ctx) {
   };
 
   // ---------------------------------------------------------------- chart
+  let chartType = localStorage.getItem("sd.chartType") || "candles";
+  const typeBtn = h("button", { class: "linkish", onclick: () => { chartType = chartType === "candles" ? "line" : "candles"; localStorage.setItem("sd.chartType", chartType); loadChart(); } });
   const rangeBar = h("div", { class: "toolbar" }, RANGES.map(([r, label]) =>
-    h("button", { class: "linkish", onclick: () => { state.range = r; localStorage.setItem("sd.range", r); loadChart(); } }, label)));
+    h("button", { class: "linkish", onclick: () => { state.range = r; localStorage.setItem("sd.range", r); loadChart(); } }, label)), h("span", { class: "muted" }, " | "), typeBtn);
   const chartHolder = h("div");
   chartBox.append(rangeBar, chartHolder);
   const loadChart = async () => {
-    [...rangeBar.children].forEach((b, i) => { b.style.fontWeight = RANGES[i][0] === state.range ? 700 : 400; });
+    [...rangeBar.children].slice(0, RANGES.length).forEach((b, i) => { b.style.fontWeight = RANGES[i][0] === state.range ? 700 : 400; });
+    typeBtn.textContent = chartType === "candles" ? "line chart" : "candles";
     clear(chartHolder, loading("Loading chart…"));
     const d = await api(`/api/stock/${enc}/history?range=${state.range}`, { ttl: 30000 });
     if (d.error) { clear(chartHolder, errorBox(d.error)); return; }
@@ -86,7 +89,12 @@ export async function render(root, params, ctx) {
                                  : new Date(t * 1000).toLocaleDateString([], { day: "2-digit", month: "short", year: "2-digit" });
     const first = pts.length ? pts[0].y : null, last = pts.length ? pts[pts.length - 1].y : null;
     const hi = pts.length ? Math.max(...pts.map((p) => p.y)) : null, lo = pts.length ? Math.min(...pts.map((p) => p.y)) : null;
-    clear(chartHolder, lineChart(pts, { ref, fmtY: (v) => price(v), fmtX, height: 240 }),
+    // candles only when the source has real OHLC (some feeds give closes only)
+    const ohlc = (d.bars || []).some((b) => b.h !== b.l);
+    const chart = chartType === "candles" && ohlc
+      ? candleChart(d.bars, { fmtY: (v) => price(v), fmtX, height: 280 })
+      : lineChart(pts, { ref, fmtY: (v) => price(v), fmtX, height: 240 });
+    clear(chartHolder, chart,
       h("p", { class: "note" }, first ? `Range ${pct((last / (ref || first) - 1) * 100)} · high ${price(hi)} · low ${price(lo)} · ${pts.length} bars · ${d.source}` : ""));
   };
 
