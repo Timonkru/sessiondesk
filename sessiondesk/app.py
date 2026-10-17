@@ -249,6 +249,10 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
                        symbol: str | None = None, limit: int = 150):
         return await news.list_news(C(), group, q, impact, symbol, min(limit, 500))
 
+    @app.get("/api/news/positions")
+    async def get_news_positions(hours: int = 12, q: str | None = None, strict: bool = False):
+        return await news.for_positions(C(), max(1, min(hours, 24 * 30)), q, strict)
+
     @app.get("/api/calendar")
     async def get_calendar(days: int = 7, back_hours: int = 12):
         now = time.time()

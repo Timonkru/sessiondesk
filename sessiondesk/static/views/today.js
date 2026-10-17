@@ -8,7 +8,7 @@ export async function render(root, _params, ctx) {
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Today"), h("span", { class: "meta" }, new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))),
     top, h("div", { class: "cols" }, left, right));
   top.appendChild(loading());
-  const brief = h("div"), changes = h("div"), notesBox = h("div");
+  const brief = h("div"), posNews = h("div"), changes = h("div"), notesBox = h("div");
   let snap = null;
 
   const load = async () => {
@@ -61,6 +61,18 @@ export async function render(root, _params, ctx) {
       note("Written from the facts SessionDesk computed (markets, releases, schedule, flows, moves, headlines, accounts). Optional daily time: Settings → AI.")));
   };
 
+  const loadPosNews = async () => {
+    const d = await api("/api/news/positions?hours=12&strict=true", { fresh: true });
+    if (d.error || !(d.held || []).length) { clear(posNews); return; }
+    clear(posNews, section("Headlines on your open positions", (d.items || []).length
+      ? h("ul", { class: "feed" }, d.items.slice(0, 10).map((n) => h("li", { class: n.impact === "high" ? "high" : "" },
+        h("div", { class: "t" }, n.url ? h("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title) : n.title),
+        h("div", { class: "m" }, `${clock(n.published)} · ${n.source} · `, h("strong", null, n.held.join(", ")), n.impact !== "normal" ? ` · ${n.impact}` : ""))))
+      : note(`Nothing in the last ${d.hours} h touching ${d.held.join(", ")}.`),
+      h("p", { class: "small" }, "Central banks, data, yields, commodities and named companies; broader matches (geopolitics, tariffs) on the ",
+        h("a", { href: "#/news" }, "News page, filter My positions"), ".")));
+  };
+
   const loadChanges = async () => {
     const a = await api("/api/activity?limit=40", { fresh: true });
     const icon = { position: "◆", level: "↕", move: "▲", release: "■", event: "◷", job: "⚙", note: "✎", briefing: "✦" };
@@ -80,9 +92,10 @@ export async function render(root, _params, ctx) {
     clear(notesBox, section("Notes", input, h("ul", { class: "feed" }, (n.items || []).slice(0, 12).map((x) => h("li", null, h("div", { class: "t" }, x.text), h("div", { class: "m" }, stamp(x.ts)))))));
   };
 
-  right.append(brief, changes, notesBox);
-  await Promise.all([load(), loadBrief(), loadChanges(), loadNotes()]);
-  const offs = ["position", "level", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") load(); }));
+  right.append(brief, posNews, changes, notesBox);
+  await Promise.all([load(), loadBrief(), loadPosNews(), loadChanges(), loadNotes()]);
+  const offs = ["position", "level", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") { load(); loadPosNews(); } }));
+  offs.push(on("news", ({ item }) => { if ((item.held || []).length) loadPosNews(); }));
   const t1 = setInterval(load, 15000), t2 = setInterval(loadChanges, 30000);
   return () => { offs.forEach((f) => f()); clearInterval(t1); clearInterval(t2); };
 }

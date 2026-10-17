@@ -5,6 +5,7 @@ import { h, clear, clock, day, note, loading } from "../lib/ui.js";
 const FILTERS = [
   ["all", "All", {}], ["high", "High impact", { impact: "high" }], ["squawk", "Squawk", { group: "squawk" }],
   ["markets", "Markets", { group: "markets" }], ["cb", "Central banks", { group: "central_banks" }],
+  ["mine", "My positions", { positions: true }],
 ];
 
 export async function render(root, _params, ctx) {
@@ -17,6 +18,7 @@ export async function render(root, _params, ctx) {
   const drawTabs = () => clear(bar, FILTERS.map(([k, label]) => h("button", { class: k === filter ? "on" : "", onclick: () => { filter = k; localStorage.setItem("sd.newsFilter", k); drawTabs(); load(); } }, label)));
   const matches = (n) => {
     const f = FILTERS.find((x) => x[0] === filter)[2];
+    if (f.positions && !(n.held || []).length) return false;
     if (f.impact && n.impact !== f.impact) return false;
     if (f.group && n.group !== f.group) return false;
     return !query;
@@ -27,6 +29,7 @@ export async function render(root, _params, ctx) {
       h("div", { class: "t" }, n.title),
       h("div", { class: "m" }, `${day(n.published)} ${clock(n.published)} · ${n.source}`,
         n.impact !== "normal" ? h("span", { class: n.impact === "high" ? "imp" : "" }, ` · ${n.impact}${n.tags && n.tags.length ? ": " + n.tags[0] : ""}`) : "",
+        (n.held || []).length ? [" · open: ", h("strong", null, n.held.join(", "))] : "",
         (n.symbols || []).length ? [" · ", ...n.symbols.slice(0, 5).flatMap((s, i) => [i ? ", " : "", h("a", { href: "#/stock/" + encodeURIComponent(s) }, s)])] : ""),
       detail);
     li.addEventListener("click", (e) => {
@@ -46,8 +49,11 @@ export async function render(root, _params, ctx) {
     clear(list, loading());
     const f = FILTERS.find((x) => x[0] === filter)[2];
     const qs = new URLSearchParams({ limit: "200", ...(f.group ? { group: f.group } : {}), ...(f.impact ? { impact: f.impact } : {}), ...(query ? { q: query } : {}) });
-    const d = await api("/api/news?" + qs.toString(), { fresh: true });
+    const d = f.positions
+      ? await api("/api/news/positions?" + new URLSearchParams({ hours: query ? String(24 * 30) : "24", ...(query ? { q: query } : {}) }), { fresh: true })
+      : await api("/api/news?" + qs.toString(), { fresh: true });
     items = d.items || [];
+    if (f.positions && !items.length) { clear(list, h("li", { class: "muted" }, d.note || "No headline touched your open positions in the last 24 h.")); info.textContent = ""; return; }
     clear(list, items.map((n) => item(n)));
     if (!items.length) list.appendChild(h("li", { class: "muted" }, query ? "No match in the archive." : "No headlines yet - the feeds are polled in the background (first fill takes a few seconds after start)."));
     const errs = Object.keys(d.feed_errors || {});

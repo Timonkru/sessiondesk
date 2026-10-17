@@ -234,7 +234,12 @@ function wirePush() {
     toast(`${count} unusual moves today`, (top || []).join(" · "), { onClick: () => ctx.go("#/watch") });
   });
   on("news", ({ item }) => {
-    if (item.impact === "high") {
+    if ((item.held || []).length) {
+      const head = `${item.source} · touches your open ${item.held.join(", ")}`;
+      toast(head, item.title, { kind: item.impact === "high" ? "high" : "", onClick: () => ctx.go("#/news") });
+      notify(head, item.title);
+      beep(item.impact === "high" ? "high" : "info");
+    } else if (item.impact === "high") {
       toast(item.source + (item.tags && item.tags.length ? " · " + item.tags[0] : ""), item.title, { kind: "high", onClick: () => ctx.go("#/news") });
       notify(item.source, item.title);
       beep("high");
