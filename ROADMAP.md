@@ -27,7 +27,6 @@ Journal, the twelve-tab instrument page), 72 offline tests green, bridge v1.10 c
 - [ ] Databento and Interactive Brokers connectors (planned entries exist in `registry.py`).
 - [ ] SEC XBRL company facts for long fundamental history (P/E history, margins over 10 years).
 - [ ] Estimated leveraged-ETF rebalancing flow on big days (AUM x L x (L-1) x return).
-- [ ] Extensions folder: private local modules that add pages/routes without entering the repo.
 - [ ] Optional AI triage of headlines (batch, cheap model) on top of the rule-based impact tags.
 - [ ] Publish a compiled `.ex5` with each GitHub release.
 

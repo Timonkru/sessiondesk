@@ -126,6 +126,7 @@ dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; text-align: right; paddi
 .feed { list-style: none; padding: 0; margin: 0; }
 .feed li { padding: 7px 0; border-bottom: 1px solid var(--line); }
 .feed li .t { color: var(--fg); }
+.feed li .t.warn { color: var(--warn); } .feed li .t.up { color: var(--up); } .feed li .t.muted { color: var(--muted); }
 .feed li .m { color: var(--muted); font-size: 12px; }
 .feed li.high .t { font-weight: 600; }
 .feed li.high .m .imp { color: var(--warn); }

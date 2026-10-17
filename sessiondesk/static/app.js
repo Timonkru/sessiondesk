@@ -20,6 +20,7 @@ const VIEWS = {
   jobs: () => import("./views/jobs.js"),
   settings: () => import("./views/settings.js"),
   help: () => import("./views/help.js"),
+  ext: () => import("./views/ext.js"),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -42,10 +43,16 @@ function parseRoute() {
   return { name, params: parts.slice(1) };
 }
 
+function markNav() {
+  const { name, params } = parseRoute();
+  const key = name === "ext" ? "ext:" + (params[0] || "") : name;
+  document.querySelectorAll("#nav a[data-route]").forEach((a) => a.classList.toggle("active", a.dataset.route === key));
+}
+
 async function route() {
   const { name, params } = parseRoute();
   const seq = ++renderSeq;
-  document.querySelectorAll("#nav a[data-route]").forEach((a) => a.classList.toggle("active", a.dataset.route === name));
+  markNav();
   $("nav").classList.remove("open");
   if (cleanup) { try { cleanup(); } catch { /* ignore */ } cleanup = null; }
   clear(viewEl);
@@ -258,6 +265,19 @@ $("theme").addEventListener("click", () => {
   localStorage.setItem("sd.theme", next); applyTheme(next);
 });
 $("menu").addEventListener("click", () => $("nav").classList.toggle("open"));
+
+// Local extensions (your own pages from <data dir>/extensions/) get a nav entry each.
+async function loadExtensions() {
+  const d = await api("/api/extensions", { fresh: true });
+  document.querySelectorAll("#nav a.ext").forEach((a) => a.remove());
+  const spacer = document.querySelector("#nav .spacer");
+  for (const e of d.items || []) {
+    spacer.before(h("a", { href: "#/ext/" + encodeURIComponent(e.name), "data-route": "ext:" + e.name, class: "ext", title: e.error || e.description || "local extension" },
+      e.title + (e.error ? " (error)" : "")));
+  }
+}
+loadExtensions().then(markNav);
+window.addEventListener("sd:extensions", () => loadExtensions().then(markNav));   // fired after a reload in Settings
 
 window.addEventListener("hashchange", route);
 connect((live) => { const c = $("conn"); c.textContent = live ? "live" : "offline"; c.className = live ? "live" : "off"; });

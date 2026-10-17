@@ -16,6 +16,7 @@ dist/
 /data/
 secrets.json
 extensions/
+!examples/extensions/
 *.sqlite3
 *.db
 *.log

@@ -76,6 +76,7 @@ DEFAULTS: dict = {
     "magic_names": {},                  # {"<EA magic number>": "readable setup name"} for Accounts & EAs
     "jobs_files": [],                   # extra job files, imported read-only
     "jobs_python": "",                  # interpreter for "python" jobs whose file names none (default: SessionDesk's own)
+    "extensions_enabled": True,         # load your own pages from <data dir>/extensions/ (see sessiondesk/extensions.py)
 }
 
 ENV_ALIASES = {

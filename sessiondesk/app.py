@@ -26,6 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import extensions as ext_mod
 from .ai import assist
 from .cache import Cache
 from .connectors.registry import build_hub
@@ -74,6 +75,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.extras["calendar"] = calendar_mod.CalendarService(ctx)
         ctx.extras["jobs"] = jobs.JobManager(ctx)
         ctx.extras["started"] = time.time()
+        ctx.extras["extensions"] = ext_mod.load_all(ctx)
         state["ctx"] = ctx
         tasks = []
         if start_background:
@@ -295,6 +297,35 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         async def build():
             return await indices.index_view(ctx, key)
         return await ctx.cache.get(f"idxview:{key}", 120, build)
+
+    # ------------------------------------------------------------------ local extensions (your own pages)
+    @app.get("/api/extensions")
+    async def get_extensions():
+        ctx = C()
+        return {"folder": str(ctx.data_dir / "extensions"), "enabled": ctx.settings.get("extensions_enabled") is not False,
+                "items": [e.describe() for e in ctx.extras["extensions"].values()]}
+
+    @app.post("/api/extensions/reload")
+    async def reload_extensions():
+        ctx = C()
+        ctx.extras["extensions"] = await asyncio.to_thread(ext_mod.load_all, ctx)
+        return await get_extensions()
+
+    @app.get("/api/ext/{name}")
+    async def get_ext_page(name: str):
+        ctx = C()
+
+        async def build():
+            return await ext_mod.page(ctx, ctx.extras["extensions"], name)
+        return await ctx.cache.get(f"ext:{name}", 3, build)
+
+    @app.post("/api/ext/{name}/action")
+    async def post_ext_action(name: str, request: Request):
+        ctx = C()
+        body = await request.json()
+        res = await ext_mod.action(ctx, ctx.extras["extensions"], name, body if isinstance(body, dict) else {})
+        ctx.cache.invalidate(f"ext:{name}")
+        return res
 
     @app.get("/api/macro/{panel}")
     async def get_macro(panel: str):

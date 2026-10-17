@@ -140,7 +140,22 @@ export async function render(root, _params, ctx) {
       h("div", null, (() => { const i = h("input", { type: "text", value: st.briefing_time || "", placeholder: "08:40 (empty = off)", style: { width: "120px" } });
         const b = h("button", { onclick: () => patch({ briefing_time: i.value.trim() }) }, "Save"); return [i, " ", b, h("span", { class: "muted small" }, "  weekdays, local time")]; })())));
 
-  clear(body, aiSection, connSection, alertSection, adv, feedsSection, privacy);
+  // ---------------------------------------------------------------- local extensions
+  const extBox = h("div");
+  const drawExt = (d) => clear(extBox,
+    table([{ label: "Page", render: (e) => h("a", { href: "#/ext/" + encodeURIComponent(e.name) }, e.title) },
+      { label: "File", render: (e) => h("span", { class: "muted small" }, e.path) },
+      { label: "Status", render: (e) => h("span", { class: e.error ? "down" : "up" }, e.error || "loaded") }],
+      d.items || [], { empty: d.enabled === false ? "Extensions are switched off." : "No extensions in the folder." }),
+    note(`Folder: ${d.folder}. A .py file there (or a folder with extension.py) becomes a page in the navigation. ` +
+      "It runs inside SessionDesk with your rights - only your own code. Format and an example: docs/EXTENSIONS.md."));
+  const extOn = h("input", { type: "checkbox", checked: st.extensions_enabled !== false });
+  const extSection = section("Extensions", extBox,
+    h("div", { class: "toolbar" }, h("label", null, extOn, "load extensions"),
+      h("button", { onclick: async () => { await patch({ extensions_enabled: extOn.checked }); const d = await api("/api/extensions/reload", { method: "POST" }); drawExt(d); window.dispatchEvent(new Event("sd:extensions")); toast("Extensions reloaded", ""); } }, "Save & reload")));
+  api("/api/extensions", { fresh: true }).then(drawExt);
+
+  clear(body, aiSection, connSection, alertSection, adv, feedsSection, extSection, privacy);
 }
 
 function connectorRow(it) {
