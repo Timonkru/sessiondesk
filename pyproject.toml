@@ -28,6 +28,9 @@ dev = ["pytest>=8"]
 [project.scripts]
 sessiondesk = "sessiondesk.__main__:main"
 
+[project.gui-scripts]
+sessiondeskw = "sessiondesk.__main__:main"      # Windows: starts without a console window (autostart)
+
 [tool.setuptools.packages.find]
 include = ["sessiondesk*"]
 

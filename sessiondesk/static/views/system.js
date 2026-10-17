@@ -51,7 +51,13 @@ export async function render(root, _params, ctx) {
             [["Version", a.version], ["Python", a.python], ["Platform", a.platform], ["Uptime", dur(a.uptime)],
             ["AI", d.ai.ready ? `${d.ai.provider || "default"} configured (a key is set; credit is not checked)` : "no key / provider"], ["Live clients", a.stream_clients],
             ["News archive", num(a.news_archive, 0) + " headlines"], ["Database", big(a.db_bytes) + "B"], ["Cache", big(a.cache_bytes) + "B"],
-            ["Data folder", a.data_dir]].flatMap(([k, v]) => [h("dt", null, k), h("dd", null, String(v))]))))));
+            ["Data folder", a.data_dir]].flatMap(([k, v]) => [h("dt", null, k), h("dd", null, String(v))])),
+            h("div", { class: "toolbar" }, h("button", { onclick: async (e) => {
+              if (!confirm("Stop SessionDesk? Background loops, alerts and running jobs end until you start it again.")) return;
+              const r = await api("/api/shutdown", { method: "POST" });
+              e.target.textContent = r.error ? r.error : "stopped - you can close this window";
+              e.target.disabled = true;
+            } }, "Stop SessionDesk"))))));
     ctx.setContext({ page: "System status", issues: d.issues, loops: d.loops, connectors: d.connectors, exporters: d.exporters, jobs: d.jobs, app: a });
     window.dispatchEvent(new CustomEvent("sd:system", { detail: d.counts }));
   };

@@ -53,3 +53,18 @@ def test_system_endpoint(client, tmp_path):
     assert any(i["area"] == "extension" and "nope" in i["text"] for i in d["issues"])
     assert d["counts"]["error"] >= 1
     assert {"loops", "connectors", "exporters", "jobs", "level_files"} <= set(d)
+
+
+def test_shutdown_needs_the_launcher(client):
+    assert "error" in client.post("/api/shutdown").json()
+    fake = SimpleNamespace(should_exit=False)
+    client.app.state.server = fake
+    assert client.post("/api/shutdown").json() == {"ok": True} and fake.should_exit is True
+
+
+def test_stop_without_server_cleans_run_file(tmp_path):
+    from sessiondesk.__main__ import stop_running, write_run_file
+    assert "does not seem to run" in stop_running(tmp_path)
+    path = write_run_file(tmp_path, 1, "127.0.0.1", "tok")           # port 1: nothing listens there
+    assert path.exists()
+    assert "No answer" in stop_running(tmp_path) and not path.exists()

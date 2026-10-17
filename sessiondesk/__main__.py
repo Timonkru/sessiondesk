@@ -1,8 +1,11 @@
-"""Start SessionDesk:  sessiondesk  [--port 8765] [--host 127.0.0.1] [--no-browser] [--app]
+"""Start SessionDesk:  sessiondesk  [--port 8765] [--host 127.0.0.1] [--no-browser] [--app] [--background] [--stop]
 
 --app opens the desk in its own window (Edge or Chrome app mode, no tabs or address bar) and is what
 the desktop shortcut uses. Starting again while SessionDesk already runs on the port just opens the
 window again instead of failing with "address in use".
+--background runs without console output (log in <data dir>/logs/server.log) and opens no browser unless
+--app is given; `sessiondeskw` (Windows, no console window) plus --background is what autostart uses.
+--stop ends a running SessionDesk (also: System page -> Stop).
 """
 from __future__ import annotations
 
@@ -71,6 +74,46 @@ def open_when_ready(url: str, app_window: bool, timeout: float = 30.0) -> None:
     threading.Thread(target=wait, daemon=True).start()
 
 
+RUN_FILE = "run.json"     # pid, port and session token of the running server (private, removed on exit)
+
+
+def write_run_file(home: Path, port: int, host: str, token: str) -> Path:
+    from .settings import _write_private
+    path = home / RUN_FILE
+    _write_private(path, {"pid": os.getpid(), "port": port, "host": host, "token": token, "started": time.time()})
+    return path
+
+
+def stop_running(home: Path) -> str:
+    import json
+    path = home / RUN_FILE
+    try:
+        info = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "SessionDesk does not seem to run (no run file)."
+    host = "127.0.0.1" if info.get("host") in ("0.0.0.0", "::", None) else info["host"]
+    req = urllib.request.Request(f"http://{host}:{info['port']}/api/shutdown", method="POST", data=b"{}",
+                                 headers={"X-SD-Token": info["token"], "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp.read()
+    except OSError as exc:
+        path.unlink(missing_ok=True)
+        return f"No answer on port {info['port']} ({exc}); removed the stale run file."
+    return f"SessionDesk on port {info['port']} is stopping."
+
+
+def log_to_file(home: Path) -> None:
+    logs = home / "logs"
+    logs.mkdir(exist_ok=True)
+    log = logs / "server.log"
+    if log.exists() and log.stat().st_size > 5_000_000:
+        log.replace(logs / "server.log.1")
+    stream = open(log, "a", encoding="utf-8", buffering=1)      # noqa: SIM115 - lives as long as the process
+    sys.stdout = sys.stderr = stream
+    print(f"--- start {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="sessiondesk", description="Local-first market desk in your browser.")
     parser.add_argument("--host", default=os.environ.get("SESSIONDESK_HOST", "127.0.0.1"),
@@ -78,7 +121,19 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.environ.get("SESSIONDESK_PORT", "8765")))
     parser.add_argument("--no-browser", action="store_true", help="do not open the browser")
     parser.add_argument("--app", action="store_true", help="open in its own app window (Edge/Chrome app mode)")
+    parser.add_argument("--background", action="store_true", help="no console output (log file), no browser unless --app")
+    parser.add_argument("--stop", action="store_true", help="stop a running SessionDesk")
     args = parser.parse_args()
+
+    from .settings import data_dir
+    home = data_dir()
+    if args.stop:
+        print(stop_running(home))
+        return
+    if args.background or sys.stdout is None:          # pythonw / sessiondeskw has no console: never print into nothing
+        log_to_file(home)
+        if not args.app:
+            args.no_browser = True
 
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host}:{args.port}/"
     state = already_running(url)
@@ -96,14 +151,23 @@ def main() -> None:
     import uvicorn
 
     from .app import create_app
-    app = create_app()
+    app = create_app(home)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         print("WARNING: listening beyond this computer. Anyone who can reach this port and load the page can use the desk "
               "and run your jobs. Use only on a trusted network or behind an authenticated tunnel.")
-    print(f"SessionDesk running at {url}  - close this window (or Ctrl+C) to stop it.")
+    if args.background:
+        print(f"SessionDesk running in the background at {url} - stop it on the System page or with `sessiondesk --stop`.")
+    else:
+        print(f"SessionDesk running at {url}  - close this window (or Ctrl+C) to stop it.")
     if not args.no_browser:
         open_when_ready(url, args.app)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning", loop="asyncio")
+    server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="warning", loop="asyncio"))
+    app.state.server = server                            # lets POST /api/shutdown end the process cleanly
+    run_file = write_run_file(home, args.port, args.host, app.state.token)
+    try:
+        server.run()
+    finally:
+        run_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

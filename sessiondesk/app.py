@@ -181,6 +181,14 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
                 chats[chat["id"]] = {"id": chat["id"], "name": chat.get("title") or chat.get("username") or chat.get("first_name") or "", "type": chat.get("type")}
         return {"chats": list(chats.values()), "note": "Send any message to your bot first, then look again."}
 
+    @app.post("/api/shutdown")
+    async def shutdown():
+        server = getattr(app.state, "server", None)
+        if server is None:
+            return {"error": "this server was not started by the sessiondesk launcher - stop it where you started it"}
+        server.should_exit = True
+        return {"ok": True}
+
     @app.get("/api/system")
     async def get_system():
         from .features import system

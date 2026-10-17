@@ -61,6 +61,18 @@ minimized console to stop it):
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\windows_shortcut.ps1
 ```
+
+Run it in the background from Windows login (no window; alerts, phone push and jobs keep working; the
+desktop shortcut then just opens the window). Stop it on the System page or with `sessiondesk --stop`;
+`-Remove` takes the autostart entry out again:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\windows_autostart.ps1
+```
+
+Elsewhere: `sessiondesk --background` (log in `~/.sessiondesk/logs/server.log`), e.g. from a login item or
+a systemd user service.
+
 Settings, keys, cache, the news archive and job logs live in `~/.sessiondesk/` (override with
 `SESSIONDESK_HOME`).
 
