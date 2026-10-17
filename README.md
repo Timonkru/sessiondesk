@@ -32,6 +32,7 @@ key**. Nothing is sent anywhere except to the sources you enable.
 | **Journal** | Closed positions with net result, initial risk and R multiple, a note per trade, statistics per setup (EA) in R. |
 | **Your own pages** | A Python file in `~/.sessiondesk/extensions/` becomes a page in the navigation: tables, lists, key figures and an input line, rendered safely and with AI support. Private logic stays on your machine. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md). |
 | **System** | Is everything doing its job? Background loops, each source's last success and error, feeds, calendar sources, broker export age, jobs, extensions, level files - condensed into one problem list; a counter in the navigation shows when something needs a look. |
+| **Phone push** | Optional: high-impact headlines, release warnings and values, position changes, headlines on your open markets, failed jobs - to your phone via ntfy (free app) or your own Telegram bot. Quiet hours, hourly limit, no duplicates. Off until you enter your own topic or bot. |
 | **AI everywhere** | Type a question in the search bar on any page and the assistant answers about what that page shows. Explain an alert, summarize an article, or ask the built-in help how to set something up. |
 
 ## Quick start

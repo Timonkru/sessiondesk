@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from . import extensions as ext_mod
+from . import push as push_mod
 from .ai import assist
 from .cache import Cache
 from .connectors.registry import build_hub
@@ -76,6 +77,8 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.extras["jobs"] = jobs.JobManager(ctx)
         ctx.extras["started"] = time.time()
         ctx.extras["extensions"] = ext_mod.load_all(ctx)
+        ctx.extras["push"] = push_mod.PhonePush(ctx)
+        ctx.broker.listen(ctx.extras["push"].on_event)
         state["ctx"] = ctx
         tasks = []
         if start_background:
@@ -136,6 +139,47 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return {"ok": True, "version": __version__, "uptime": time.time() - ctx.extras["started"],
                 "data_dir": str(ctx.data_dir), "ai_provider": ctx.settings.get("ai.provider"),
                 "ai_ready": bool(assist.pick_provider(ctx) and assist.pick_provider(ctx).active())}
+
+    # ------------------------------------------------------------------ phone push (ntfy / own Telegram bot)
+    @app.get("/api/push")
+    async def get_push():
+        return C().extras["push"].status()
+
+    @app.post("/api/push")
+    async def post_push(request: Request):
+        ctx = C()
+        body = await request.json()
+        cfg = body.get("config")
+        if isinstance(cfg, dict):
+            allowed = set(push_mod.DEFAULTS)
+            ctx.settings.update({"push": {k: v for k, v in cfg.items() if k in allowed}})
+        for key, value in (body.get("secrets") or {}).items():
+            if key in ("ntfy_topic", "ntfy_token", "telegram_token") and value is not None:
+                ctx.secrets.set(f"push.{key}", str(value))
+        return ctx.extras["push"].status()
+
+    @app.post("/api/push/test")
+    async def push_test():
+        ctx = C()
+        res = await ctx.extras["push"].send({"title": "SessionDesk test", "body": "Phone push works.", "priority": 3, "kind": "test"})
+        ctx.extras["push"].log.appendleft({"ts": time.time(), "title": "SessionDesk test", **res})
+        return res
+
+    @app.get("/api/push/telegram_chats")
+    async def push_telegram_chats():
+        ctx = C()
+        token = ctx.secrets.get("push.telegram_token")
+        if not token:
+            return {"error": "save the bot token first"}
+        resp = await ctx.http.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=10)
+        if resp.status_code != 200:
+            return {"error": f"Telegram HTTP {resp.status_code}"}
+        chats = {}
+        for upd in resp.json().get("result", []):
+            chat = (upd.get("message") or upd.get("channel_post") or {}).get("chat") or {}
+            if chat.get("id"):
+                chats[chat["id"]] = {"id": chat["id"], "name": chat.get("title") or chat.get("username") or chat.get("first_name") or "", "type": chat.get("type")}
+        return {"chats": list(chats.values()), "note": "Send any message to your bot first, then look again."}
 
     @app.get("/api/system")
     async def get_system():
@@ -791,4 +835,5 @@ def background(ctx) -> list:
         every(lambda: 60, scheduled_briefing, first_delay=90, name="briefing"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
+        ctx.extras["push"].run(),
     ]

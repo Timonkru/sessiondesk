@@ -140,6 +140,57 @@ export async function render(root, _params, ctx) {
       h("div", null, (() => { const i = h("input", { type: "text", value: st.briefing_time || "", placeholder: "08:40 (empty = off)", style: { width: "120px" } });
         const b = h("button", { onclick: () => patch({ briefing_time: i.value.trim() }) }, "Save"); return [i, " ", b, h("span", { class: "muted small" }, "  weekdays, local time")]; })())));
 
+  // ---------------------------------------------------------------- phone push
+  const pushBox = h("div", null, loading());
+  const pushSection = section("Phone push", pushBox);
+  const drawPush = (d) => {
+    const c = d.config, sec = d.secrets;
+    const on = h("input", { type: "checkbox", checked: c.enabled });
+    const service = h("select", null, [["ntfy", "ntfy (free app, iOS/Android)"], ["telegram", "Telegram (your own bot)"]].map(([v, l]) => h("option", { value: v, selected: c.service === v }, l)));
+    const secretInput = (key, ph) => h("input", { type: "password", autocomplete: "off", placeholder: sec[key].set ? `set (${sec[key].hint}) - type to replace` : ph, style: { width: "100%" } });
+    const server = h("input", { type: "text", value: c.ntfy_server, style: { width: "100%" } });
+    const topic = secretInput("ntfy_topic", "your topic, e.g. " + d.suggested_topic);
+    const ntfyToken = secretInput("ntfy_token", "optional access token (own server / reserved topic)");
+    const tgToken = secretInput("telegram_token", "bot token from @BotFather");
+    const chat = h("input", { type: "text", value: c.telegram_chat || "", placeholder: "chat id", style: { width: "160px" } });
+    const chats = h("span", { class: "small muted" });
+    const evs = d.events.map((e) => [e.key, h("input", { type: "checkbox", checked: !!c.events[e.key] }), e.label]);
+    const warn = h("input", { type: "text", value: (c.warn_minutes || []).join(", "), style: { width: "90px" } });
+    const qFrom = h("input", { type: "text", value: c.quiet_from || "", placeholder: "22:00", style: { width: "70px" } });
+    const qTo = h("input", { type: "text", value: c.quiet_to || "", placeholder: "07:00", style: { width: "70px" } });
+    const maxH = h("input", { type: "number", value: c.max_per_hour, min: 1, max: 500, style: { width: "70px" } });
+    const result = h("span", { class: "small" });
+    const save = async () => {
+      const body = { config: { enabled: on.checked, service: service.value, ntfy_server: server.value.trim() || "https://ntfy.sh", telegram_chat: chat.value.trim(),
+        events: Object.fromEntries(evs.map(([k, box]) => [k, box.checked])), quiet_from: qFrom.value.trim(), quiet_to: qTo.value.trim(),
+        warn_minutes: warn.value.split(/[ ,]+/).map(Number).filter((x) => x > 0), max_per_hour: Number(maxH.value) || 30 },
+        secrets: Object.fromEntries([["ntfy_topic", topic], ["ntfy_token", ntfyToken], ["telegram_token", tgToken]].filter(([, i]) => i.value.trim()).map(([k, i]) => [k, i.value.trim()])) };
+      const r = await api("/api/push", { method: "POST", body });
+      if (r.error) toast("Not saved", r.error); else { toast("Saved", ""); drawPush(r); }
+    };
+    const test = async () => { result.textContent = "sending…"; const r = await api("/api/push/test", { method: "POST" }); result.textContent = r.ok ? "sent - check your phone" : r.error; result.className = "small " + (r.ok ? "up" : "down"); };
+    const findChat = async () => { const r = await api("/api/push/telegram_chats", { fresh: true }); if (r.error) { chats.textContent = r.error; return; }
+      chats.textContent = r.chats.length ? r.chats.map((x) => `${x.id} (${x.name})`).join(", ") : r.note; if (r.chats.length === 1) chat.value = r.chats[0].id; };
+    clear(pushBox,
+      h("div", { class: "formgrid" },
+        h("label", null, "Send to phone"), h("div", null, h("label", null, on, " on"), "  ", service),
+        h("label", null, "ntfy server"), server, h("label", null, "ntfy topic"), h("div", null, topic, h("button", { class: "linkish", onclick: () => { topic.type = "text"; topic.value = d.suggested_topic; } }, "use a random topic")),
+        h("label", null, "ntfy token"), ntfyToken,
+        h("label", null, "Telegram bot token"), tgToken,
+        h("label", null, "Telegram chat"), h("div", null, chat, " ", h("button", { class: "linkish", onclick: findChat }, "find my chat id"), " ", chats),
+        h("label", null, "Warn minutes before"), h("div", null, warn, h("span", { class: "muted small" }, "  minutes before a high-impact release (the app itself warns at 30/5/1)")),
+        h("label", null, "Quiet hours"), h("div", null, qFrom, " to ", qTo, h("span", { class: "muted small" }, "  only position changes come through")),
+        h("label", null, "Max per hour"), maxH),
+      h("div", { class: "checks" }, evs.map(([, box, label]) => h("label", { style: { display: "block" } }, box, " ", label))),
+      h("div", { class: "toolbar" }, h("button", { onclick: save }, "Save"), h("button", { onclick: test }, "Send test"), result),
+      d.log.length ? table([{ label: "Sent", render: (x) => new Date(x.ts * 1000).toLocaleString() }, { label: "Message", render: (x) => x.title },
+        { label: "Result", render: (x) => h("span", { class: x.ok ? "up" : "down" }, x.ok ? "ok" : x.error) }], d.log.slice(0, 8)) : null,
+      note("ntfy: install the ntfy app, subscribe to the same topic, and treat the topic like a password (on ntfy.sh anyone who knows it can read it). " +
+        "Telegram: create a bot with @BotFather, paste its token, send the bot any message, then 'find my chat id'. Topic and tokens are stored in secrets.json. " +
+        `Rate limit and duplicates are handled here${d.dropped ? `; ${d.dropped} messages were dropped by the hourly limit` : ""}.`));
+  };
+  api("/api/push", { fresh: true }).then(drawPush);
+
   // ---------------------------------------------------------------- local extensions
   const extBox = h("div");
   const drawExt = (d) => clear(extBox,
@@ -155,7 +206,7 @@ export async function render(root, _params, ctx) {
       h("button", { onclick: async () => { await patch({ extensions_enabled: extOn.checked }); const d = await api("/api/extensions/reload", { method: "POST" }); drawExt(d); window.dispatchEvent(new Event("sd:extensions")); toast("Extensions reloaded", ""); } }, "Save & reload")));
   api("/api/extensions", { fresh: true }).then(drawExt);
 
-  clear(body, aiSection, connSection, alertSection, adv, feedsSection, extSection, privacy);
+  clear(body, aiSection, connSection, alertSection, pushSection, adv, feedsSection, extSection, privacy);
 }
 
 function connectorRow(it) {

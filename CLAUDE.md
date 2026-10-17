@@ -24,6 +24,7 @@ Never claim a result that was not just produced: "tests green" only after runnin
   flows, research, macro, broker, jobs)
 - `sessiondesk/connectors/` - outside systems; `registry.py` lists them; `base.py` defines shapes
 - `sessiondesk/extensions.py` - loader for the user's own pages (`<data dir>/extensions/`, docs/EXTENSIONS.md)
+- `sessiondesk/push.py` - optional phone push (ntfy / own Telegram bot); topic and tokens are secrets
 - `sessiondesk/ai/` - providers (official Anthropic SDK, OpenAI-compatible, Gemini, Ollama) + assist rules
 - `sessiondesk/static/` - browser UI, vanilla ES modules, no build step; `lib/ui.js` helpers
 - `bridge/SessionDeskBridge.mq5` - read-only MetaTrader 5 exporter

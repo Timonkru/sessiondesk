@@ -13,6 +13,8 @@ sessiondesk/app.py  FastAPI: routes, security guard, background loops
    |     yahoo  rss  public (fred, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
    |     alphavantage, tradingeconomics, alpaca)  registry.py (the list + planned entries)
    +-- ai/         providers.py (Anthropic SDK, OpenAI-compatible, Gemini, Ollama) + assist.py (rules, prompts)
+   +-- push.py     phone push (ntfy / own Telegram bot): broker listener -> queue -> sender, off by default
+   +-- extensions.py  the user's own pages from <data dir>/extensions/
    +-- cache.py    async stale-while-revalidate cache, single-flight, disk persistence, failure backoff
    +-- events.py   in-process pub/sub -> Server-Sent Events
    +-- db.py       SQLite: news archive (FTS5), alerts, reading list, AI usage
