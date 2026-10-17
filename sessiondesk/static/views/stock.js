@@ -3,7 +3,7 @@
 // indices, FX, futures and crypto get the tabs that make sense for them.
 import { api } from "../lib/api.js";
 import { lineChart, candleChart } from "../lib/chart.js";
-import { h, clear, price, pct, big, num, ratio, dir, stamp, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, price, pct, big, num, ratio, dir, stamp, note, loading, errorBox, toast } from "../lib/ui.js";
 import * as T from "./stock_tabs.js";
 
 const RANGES = [["1d", "1D"], ["5d", "5D"], ["1mo", "1M"], ["3mo", "3M"], ["6mo", "6M"], ["1y", "1Y"], ["5y", "5Y"], ["max", "Max"]];
@@ -50,7 +50,15 @@ export async function render(root, params, ctx) {
         h("span", { style: { fontSize: "28px", fontWeight: 600 } }, price(q.price)),
         h("span", { class: dir(q.change_pct), style: { fontSize: "17px" } }, `${q.change != null ? (q.change > 0 ? "+" : "") + price(q.change) : ""}  ${pct(q.change_pct)}`),
         h("span", { class: "meta" }, q.time ? `last trade ${stamp(q.time)} · ${q.source || "?"}` : ""),
-        h("button", { class: "linkish", onclick: () => ctx.ask(`Give me a compact but deep read of ${symbol}: what moved it recently, how it is valued against peers and its own history, what the street expects, and the main risks visible in this data.`) }, "Ask AI about this")));
+        h("button", { class: "linkish", onclick: () => ctx.ask(`Give me a compact but deep read of ${symbol}: what moved it recently, how it is valued against peers and its own history, what the street expects, and the main risks visible in this data.`) }, "Ask AI about this"),
+        h("button", { class: "linkish", onclick: async () => {
+          const raw = prompt(`Price alert for ${symbol} (now ${price(q.price)}). Enter a price: above the current price alerts when it rises to it, below when it falls to it.`);
+          if (!raw) return;
+          const level = Number(raw.replace(",", "."));
+          if (!Number.isFinite(level) || !q.price) { toast("Alert not set", "Enter a number."); return; }
+          const r = await api("/api/price_alerts", { method: "POST", body: { symbol, op: level >= q.price ? "above" : "below", level } });
+          if (r.error) toast("Alert not set", r.error); else toast("Price alert set", `${symbol} ${level >= q.price ? "≥" : "≤"} ${price(level)} - manage on the Levels page`);
+        } }, "Set price alert")));
     drawStrip(s);
     drawTabs();
     return s;

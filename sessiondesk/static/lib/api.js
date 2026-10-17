@@ -71,7 +71,7 @@ export function connect(stateCb) {
     source = new EventSource(`/api/stream?t=${encodeURIComponent(TOKEN)}&since=${lastId}`);
     source.onopen = () => onState(true);
     source.onerror = () => { onState(false); source.close(); setTimeout(open, 3000); };
-    const kinds = ["alert", "level", "position", "briefing", "alert_digest", "alert_ai", "news", "event_warning", "release", "release_headline", "job", "job_line", "workflow"];
+    const kinds = ["alert", "level", "position", "briefing", "alert_digest", "alert_ai", "news", "event_warning", "release", "release_headline", "job", "job_line", "workflow", "price_alert"];
     for (const k of kinds) {
       source.addEventListener(k, (ev) => {
         const data = JSON.parse(ev.data);

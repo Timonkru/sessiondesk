@@ -229,6 +229,11 @@ function wirePush() {
     toast(alert.title, (alert.body || "").split(". ").slice(0, 2).join(". ").slice(0, 160), { kind, onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });
     notify("Unusual move: " + alert.title, (alert.body || "").slice(0, 180));
   });
+  on("price_alert", ({ alert }) => {
+    toast("Price alert: " + alert.title, alert.body, { kind: "high", onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });
+    notify("Price alert: " + alert.title, alert.body);
+    beep("high");
+  });
   on("level", ({ alert }) => {
     toast(alert.title, alert.body, { kind: (alert.data || {}).direction === "up" ? "up" : "down", onClick: () => ctx.go("#/levels") });
     notify("Level: " + alert.title, alert.body);

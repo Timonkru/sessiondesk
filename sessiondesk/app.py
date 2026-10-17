@@ -36,7 +36,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import deep, flows, indices, jobs, levels, macro, markets, movers, news, research, risk, stocks, today, valuation
+from .features import deep, flows, indices, jobs, levels, macro, markets, movers, news, pricealerts, research, risk, stocks, today, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -180,6 +180,21 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             if chat.get("id"):
                 chats[chat["id"]] = {"id": chat["id"], "name": chat.get("title") or chat.get("username") or chat.get("first_name") or "", "type": chat.get("type")}
         return {"chats": list(chats.values()), "note": "Send any message to your bot first, then look again."}
+
+    # ------------------------------------------------------------------ price alerts you set yourself
+    @app.get("/api/price_alerts")
+    async def get_price_alerts():
+        return await pricealerts.listing(C())
+
+    @app.post("/api/price_alerts")
+    async def post_price_alert(request: Request):
+        body = await request.json()
+        return await asyncio.to_thread(pricealerts.create, C(), body.get("symbol", ""), body.get("op", ""), body.get("level"), body.get("note", ""))
+
+    @app.post("/api/price_alerts/{alert_id}")
+    async def change_price_alert(alert_id: str, request: Request):
+        body = await request.json()
+        return await asyncio.to_thread(pricealerts.update, C(), alert_id, delete=bool(body.get("delete")), rearm=bool(body.get("rearm")))
 
     @app.post("/api/shutdown")
     async def shutdown():
@@ -651,7 +666,8 @@ async def run_briefing(ctx, kind: str) -> dict:
     return res
 
 
-ACTIVITY_KINDS = {"alert": "move", "level": "level", "release": "release", "release_headline": "release", "event_warning": "event"}
+ACTIVITY_KINDS = {"alert": "move", "level": "level", "release": "release", "release_headline": "release", "event_warning": "event",
+                  "price_alert": "price"}
 
 
 def record_activity(ctx):
@@ -675,6 +691,9 @@ def record_activity(ctx):
             if j.get("status") not in ("ok", "failed"):
                 return
             title, body = f"job {j.get('name')}: {j.get('status')}", j.get("issue") or ""
+        elif kind == "price_alert":
+            a = ev.get("alert") or {}
+            title, body = "price alert: " + a.get("title", ""), a.get("body", "")
         elif kind == "news" and (ev.get("item") or {}).get("impact") == "high":
             title = (ev.get("item") or {}).get("title", "")
         else:
@@ -720,6 +739,9 @@ def background(ctx) -> list:
             stat["last_end"] = time.time()
             stat["duration"] = stat["last_end"] - stat["last_start"]
             await asyncio.sleep(seconds_fn())
+
+    async def price_alert_check():
+        await pricealerts.run_check(ctx)
 
     async def warm_news():
         # First pass fills the archive silently (no notification storm after a restart).
@@ -841,6 +863,7 @@ def background(ctx) -> list:
         every(lambda: 10, watch_positions, first_delay=12, name="positions"),
         every(lambda: 3600, warm_indices, first_delay=180, name="indices"),
         every(lambda: 60, scheduled_briefing, first_delay=90, name="briefing"),
+        every(lambda: 15, price_alert_check, first_delay=30, name="price alerts"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
         ctx.extras["push"].run(),

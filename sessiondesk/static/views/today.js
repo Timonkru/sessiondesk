@@ -75,7 +75,7 @@ export async function render(root, _params, ctx) {
 
   const loadChanges = async () => {
     const a = await api("/api/activity?limit=40", { fresh: true });
-    const icon = { position: "◆", level: "↕", move: "▲", release: "■", event: "◷", job: "⚙", note: "✎", briefing: "✦" };
+    const icon = { position: "◆", level: "↕", price: "◎", move: "▲", release: "■", event: "◷", job: "⚙", note: "✎", briefing: "✦" };
     clear(changes, section("Changes", (a.items || []).length ? h("ul", { class: "feed" }, a.items.map((x) => h("li", null,
       h("div", { class: "t" }, h("span", { class: "muted" }, (icon[x.kind] || "·") + " "), x.title),
       h("div", { class: "m" }, `${stamp(x.ts)} · ${x.kind}`, x.body ? ` · ${x.body.slice(0, 160)}` : "")))) : note("Nothing logged yet.")));
@@ -94,7 +94,7 @@ export async function render(root, _params, ctx) {
 
   right.append(brief, posNews, changes, notesBox);
   await Promise.all([load(), loadBrief(), loadPosNews(), loadChanges(), loadNotes()]);
-  const offs = ["position", "level", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") { load(); loadPosNews(); } }));
+  const offs = ["position", "level", "price_alert", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") { load(); loadPosNews(); } }));
   offs.push(on("news", ({ item }) => { if ((item.held || []).length) loadPosNews(); }));
   const t1 = setInterval(load, 15000), t2 = setInterval(loadChanges, 30000);
   return () => { offs.forEach((f) => f()); clearInterval(t1); clearInterval(t2); };
