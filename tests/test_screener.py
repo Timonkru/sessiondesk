@@ -58,3 +58,12 @@ def test_screen_rows_with_cached_profile(tmp_path):
     aapl = next(r for r in out["rows"] if r["symbol"] == "AAPL")
     assert aapl["pe_fwd"] == 30.5 and aapl["div_yield"] == pytest.approx(0.4) and aapl["sector"]
     assert "error" in asyncio.run(screener.screen(ctx, "nope"))
+
+
+def test_universes_endpoint_and_scan_selection(client):
+    d = client.get("/api/universes").json()
+    keys = {u["key"]: u["members"] for u in d["items"]}
+    assert {"ftse100", "cac40", "smi", "stoxx50"} <= set(keys) and keys["ftse100"] == 100 and keys["smi"] == 20
+    assert "error" in client.put("/api/universes/scan", json={"keys": ["nope"]}).json()
+    assert client.put("/api/universes/scan", json={"keys": ["ftse100", "dax40"]}).json()["scan"] == ["ftse100", "dax40"]
+    assert client.get("/api/settings").json()["settings"]["universes"] == ["ftse100", "dax40"]

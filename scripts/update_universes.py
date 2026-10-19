@@ -75,6 +75,27 @@ def main() -> int:
         rows.append({"symbol": sym, "name": r[col(dx, "Company")], "sector": r[sector_col] if sector_col else "", "industry": ""})
     write("dax40", rows)
 
+    ft = pick(tables("https://en.wikipedia.org/wiki/FTSE_100_Index"), "Company", "Ticker")
+    sec = next((c for c in ft.columns if "sector" in str(c).lower()), None)
+    write("ftse100", [{"symbol": str(r[col(ft, "Ticker")]).strip().rstrip(".").replace(".", "-") + ".L", "name": r[col(ft, "Company")],
+                       "sector": r[sec] if sec else "", "industry": ""} for _, r in ft.iterrows()])
+
+    ca = pick(tables("https://en.wikipedia.org/wiki/CAC_40"), "Company", "Ticker")
+    write("cac40", [{"symbol": str(r[col(ca, "Ticker")]).strip(), "name": r[col(ca, "Company")], "sector": r[col(ca, "Sector")],
+                     "industry": r[col(ca, "GICS Sub")]} for _, r in ca.iterrows()])
+
+    sm = pick(tables("https://en.wikipedia.org/wiki/Swiss_Market_Index"), "Name", "Ticker", "Sector")
+    rows = []
+    for _, r in sm.iterrows():
+        t = str(r[col(sm, "Ticker")]).strip()
+        if t and t.lower() != "nan" and t.isalnum():
+            rows.append({"symbol": t + ".SW", "name": r[col(sm, "Name")], "sector": r[col(sm, "Sector")], "industry": ""})
+    write("smi", rows)
+
+    es = pick(tables("https://en.wikipedia.org/wiki/EURO_STOXX_50"), "Ticker", "Name", "Sector")
+    write("stoxx50", [{"symbol": str(r[col(es, "Ticker")]).strip(), "name": r[col(es, "Name")], "sector": r[col(es, "Sector")],
+                       "industry": ""} for _, r in es.iterrows()])
+
     # Wikipedia no longer carries a parseable Dow table: the 30 members are maintained here (changes are rare and announced).
     sp = {r["symbol"]: r for r in rows_of("sp500")}
     write("dow30", [{"symbol": t, "name": sp.get(t, {}).get("name", t), "sector": sp.get(t, {}).get("sector", ""),

@@ -4,9 +4,8 @@ import { api } from "../lib/api.js";
 import { lineChart } from "../lib/chart.js";
 import { h, clear, table, section, num, pct, price, signed, dir, note, loading, errorBox, ago } from "../lib/ui.js";
 
-const INDICES = [["sp500", "S&P 500"], ["nasdaq100", "Nasdaq-100"], ["dax40", "DAX 40"], ["dow30", "Dow 30"]];
-
 export async function render(root, params, ctx) {
+  const INDICES = ((await api("/api/universes", { ttl: 600000 })).items || []).map((u) => [u.key, u.name]);
   const key = INDICES.some(([k]) => k === params[0]) ? params[0] : "sp500";
   const tabBar = h("div", { class: "tabs" }, INDICES.map(([k, label]) =>
     h("button", { class: k === key ? "on" : "", onclick: () => ctx.go("#/indices/" + k) }, label)));

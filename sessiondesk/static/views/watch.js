@@ -1,43 +1,32 @@
-// Watchlist + unusual-move scanner + alert history with explanations.
+// Movers: unusual-move scan over the indices you pick, biggest moves, alert history with explanations.
+// The watchlist itself lives on the Markets page; its stocks are always part of the scan.
 import { api, on } from "../lib/api.js";
-import { h, clear, table, section, sparkline, price, pct, num, dir, stamp, clock, note, loading, errorBox, markdown } from "../lib/ui.js";
+import { h, clear, table, section, pct, num, dir, stamp, clock, note, loading, errorBox, markdown } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
-  const wl = h("div"), mv = h("div"), al = h("div");
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Watchlist & movers")), h("div", { class: "cols" }, h("div", null, wl, mv), al));
+  const scope = h("div"), mv = h("div"), al = h("div");
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Movers"), h("span", { class: "meta" }, "unusual moves across the indices you scan and your watchlist")),
+    h("div", { class: "cols" }, h("div", null, mv, scope), al));
   const state = { watch: null, movers: null, alerts: null };
   const pushCtx = () => ctx.setContext({
-    page: "Watchlist & movers",
-    watchlist: state.watch && Object.values(state.watch.quotes || {}).map((q) => ({ symbol: q.symbol, last: q.price, change_pct: q.change_pct })),
+    page: "Movers",
     flagged_moves: state.movers && (state.movers.flagged || []).map((f) => ({ symbol: f.symbol, name: f.name, pct: f.pct, z: f.z, explanation: f.explanation })),
     recent_alerts: state.alerts && state.alerts.slice(0, 15).map((a) => ({ title: a.title, body: a.body, ai: a.ai })),
   });
 
-  // ---------------------------------------------------------------- watchlist
-  const loadWatch = async () => {
-    const d = await api("/api/watchlist", { fresh: true });
-    state.watch = d;
-    const q = d.quotes || {};
-    const editor = h("input", { type: "text", placeholder: "add symbol, e.g. NVDA or SAP.DE", style: { width: "220px" } });
-    const add = async () => {
-      const sym = editor.value.trim().toUpperCase();
-      if (!sym) return;
-      await api("/api/watchlist", { method: "PUT", body: { symbols: [...d.symbols, sym] } });
-      loadWatch();
-    };
-    editor.addEventListener("keydown", (e) => { if (e.key === "Enter") add(); });
-    clear(wl, section("Watchlist", h("div", { class: "toolbar" }, editor, h("button", { onclick: add }, "Add")),
-      table([
-        { label: "Symbol", render: (s) => h("a", { href: "#/stock/" + encodeURIComponent(s) }, s) },
-        { label: "Last", num: true, render: (s) => price(q[s] && q[s].price) },
-        { label: "Δ %", num: true, cls: (s) => dir(q[s] && q[s].change_pct), render: (s) => pct(q[s] && q[s].change_pct) },
-        { label: "Today", num: true, render: (s) => sparkline(q[s] && q[s].spark, { ref: q[s] && q[s].prev_close }) },
-        { label: "", num: true, render: (s) => h("button", { class: "linkish", onclick: async () => {
-          await api("/api/watchlist", { method: "PUT", body: { symbols: d.symbols.filter((x) => x !== s) } }); loadWatch();
-        } }, "remove") },
-      ], d.symbols || [], { empty: "Your watchlist is empty." }),
-      d.error ? errorBox(d.error) : null));
-    pushCtx();
+  // ---------------------------------------------------------------- which indices the scan covers (same list as Screener / Indices)
+  const loadUniverses = async () => {
+    const u = await api("/api/universes", { fresh: true });
+    const boxes = (u.items || []).map((x) => [x.key, h("input", { type: "checkbox", checked: (u.scan || []).includes(x.key) }), `${x.name} (${x.members})`]);
+    const status = h("span", { class: "small muted" });
+    clear(scope, section("Indices to scan", h("div", { class: "screenfilters" }, boxes.map(([, box, label]) => h("label", null, box, " ", label))),
+      h("div", { class: "toolbar" }, h("button", { onclick: async () => {
+        const r = await api("/api/universes/scan", { method: "PUT", body: { keys: boxes.filter(([, b]) => b.checked).map(([k]) => k) } });
+        status.textContent = r.error || "saved - scanning…";
+        if (!r.error) await loadMovers(true);
+        status.textContent = r.error || "";
+      } }, "Save & scan"), status),
+      note("The Screener and the Indices page offer the same indices for filtering and breadth.")));
   };
 
   // ---------------------------------------------------------------- movers
@@ -92,9 +81,8 @@ export async function render(root, _params, ctx) {
         a.acked ? null : h("button", { class: "linkish", onclick: async () => { await api(`/api/alerts/${a.id}/ack`, { method: "POST" }); loadAlerts(); } }, "mark read")));
   };
 
-  await Promise.all([loadWatch(), loadMovers(), loadAlerts()]);
+  await Promise.all([loadUniverses(), loadMovers(), loadAlerts()]);
   const off1 = on("alert", () => { loadAlerts(); loadMovers(); });
   const off2 = on("alert_ai", loadAlerts);
-  const t = setInterval(loadWatch, 20000);
-  return () => { clearInterval(t); off1(); off2(); };
+  return () => { off1(); off2(); };
 }

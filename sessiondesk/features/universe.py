@@ -7,8 +7,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1] / "data" / "universes"
 
-UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dax40": "DAX 40", "dow30": "Dow 30"}
-BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dax40": "^GDAXI", "dow30": "^DJI"}
+UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dow30": "Dow 30", "dax40": "DAX 40", "ftse100": "FTSE 100",
+             "cac40": "CAC 40", "smi": "SMI", "stoxx50": "Euro Stoxx 50"}
+BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dow30": "^DJI", "dax40": "^GDAXI", "ftse100": "^FTSE", "cac40": "^FCHI",
+             "smi": "^SSMI", "stoxx50": "^STOXX50E"}
 
 # GICS sector (S&P 500 file) / ICB industry (Nasdaq-100 file) -> SPDR sector ETF
 SECTOR_ETF = {
@@ -39,8 +41,8 @@ def lookup(symbol: str) -> dict | None:
 
 
 def sector_etf(symbol: str, sector: str | None = None) -> str | None:
-    if symbol.endswith(".DE") or symbol.endswith(".PA"):
-        return None                      # no matching sector ETF series for German listings in the free set
+    if "." in symbol:
+        return None                      # non-US listing (.DE, .L, .PA, .SW ...): no matching US sector ETF
     if not sector:
         m = lookup(symbol)
         sector = m["sector"] if m else None

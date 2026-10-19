@@ -407,6 +407,25 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.cache.invalidate(f"ext:{name}")
         return res
 
+    # ------------------------------------------------------------------ index universes (one list for movers scan, screener, indices)
+    @app.get("/api/universes")
+    async def get_universes():
+        from .features import universe
+        ctx = C()
+        return {"items": [{"key": k, "name": v, "members": len(universe.members(k))} for k, v in universe.UNIVERSES.items()],
+                "scan": [u for u in (ctx.settings.get("universes") or []) if u in universe.UNIVERSES]}
+
+    @app.put("/api/universes/scan")
+    async def put_scan_universes(request: Request):
+        from .features import universe
+        ctx = C()
+        keys = [k for k in (await request.json()).get("keys", []) if k in universe.UNIVERSES]
+        if not keys:
+            return {"error": "pick at least one index to scan"}
+        ctx.settings.replace("universes", keys)
+        ctx.cache.invalidate("movers")
+        return await get_universes()
+
     @app.get("/api/screener/{key}")
     async def get_screener(key: str):
         from .features import screener

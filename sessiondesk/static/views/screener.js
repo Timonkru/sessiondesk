@@ -1,8 +1,8 @@
 // Screener: filter and sort an index universe by price behaviour (and cached fundamentals). Describes, never signals.
+// The universes are the same list the Movers scan and the Indices page use (/api/universes).
 import { api } from "../lib/api.js";
 import { h, clear, table, num, pct, price, big, dir, note, loading, errorBox, ago } from "../lib/ui.js";
 
-const UNIVERSES = [["sp500", "S&P 500"], ["nasdaq100", "Nasdaq-100"], ["dax40", "DAX 40"], ["dow30", "Dow 30"]];
 // [key, label, step] - each gets a min and a max box
 const FILTERS = [["chg1d", "Today %"], ["chg20d", "20 days %"], ["chg60d", "60 days %"], ["from_high", "From 52w high %"],
   ["dist200", "From 200-day avg %"], ["rsi14", "RSI 14"], ["vol20", "Volatility 20d %"], ["pe_fwd", "Forward P/E"], ["div_yield", "Dividend yield %"]];
@@ -18,6 +18,7 @@ const PRESETS = {
 };
 
 export async function render(root, params, ctx) {
+  const UNIVERSES = ((await api("/api/universes", { ttl: 600000 })).items || []).map((u) => [u.key, u.name]);
   const key = UNIVERSES.some(([k]) => k === params[0]) ? params[0] : (localStorage.getItem("sd.screenU") || "sp500");
   localStorage.setItem("sd.screenU", key);
   const tabBar = h("div", { class: "tabs" }, UNIVERSES.map(([k, label]) => h("button", { class: k === key ? "on" : "", onclick: () => ctx.go("#/screener/" + k) }, label)));

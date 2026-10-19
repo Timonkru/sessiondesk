@@ -1,0 +1,42 @@
+# source: Wikipedia, fetched 2026-10-19 - re-run scripts/update_universes.py after index reviews
+symbol,name,sector,industry
+AC.PA,Accor,Consumer Services,"Hotels, Restaurants & Leisure"
+AI.PA,Air Liquide,Basic Materials,Industrial Gases
+AIR.PA,Airbus,Industrials,Aerospace & Defense
+MT.AS,ArcelorMittal,Basic Materials,Steel
+CS.PA,Axa,Financial Services,Life & Health Insurance
+BNP.PA,BNP Paribas,Financial Services,Diversified Banks
+EN.PA,Bouygues,Industrials,Construction & Engineering
+BVI.PA,Bureau Veritas,Industrials,Research & Consulting Services
+CAP.PA,Capgemini,Technology,IT Consulting & Other Services
+CA.PA,Carrefour,Consumer Defensive,Hypermarkets & Super Centers
+ACA.PA,Crédit Agricole,Financial Services,Regional Banks
+BN.PA,Danone,Consumer Defensive,Packaged Foods & Meats
+DSY.PA,Dassault Systèmes,Technology,Application Software
+FGR.PA,Eiffage,Industrials,Construction & Engineering
+ENGI.PA,Engie,Utilities,Gas Utilities
+EL.PA,EssilorLuxottica,Healthcare,"Apparel, Accessories & Luxury Goods"
+ERF.PA,Eurofins Scientific,Healthcare,Biotechnologies
+ENX.PA,Euronext,Financial Services,Financial Exchanges & Data
+RMS.PA,Hermès,Consumer Cyclical,"Apparel, Accessories & Luxury Goods"
+KER.PA,Kering,Consumer Cyclical,"Apparel, Accessories & Luxury Goods"
+OR.PA,L'Oréal,Consumer Defensive,Personal Products
+LR.PA,Legrand,Industrials,Electrical Components & Equipment
+MC.PA,LVMH,Consumer Cyclical,"Apparel, Accessories & Luxury Goods"
+ML.PA,Michelin,Industrials,Tires & Rubber
+ORA.PA,Orange,Communication Services,Integrated Telecommunication Services
+RI.PA,Pernod Ricard,Consumer Defensive,Distillers & Vintners
+PUB.PA,Publicis,Communication Services,Advertising
+RNO.PA,Renault,Consumer Cyclical,Automobile Manufacturers
+SAF.PA,Safran,Industrials,Aerospace & Defense
+SGO.PA,Saint-Gobain,Industrials,Building Products
+SAN.PA,Sanofi,Healthcare,Pharmaceuticals
+SU.PA,Schneider Electric,Industrials,Electrical Components & Equipment
+GLE.PA,Société Générale,Financial Services,Diversified Banks
+STLAP.PA,Stellantis,Consumer Cyclical,Automobile Manufacturers
+STMPA.PA,STMicroelectronics,Technology,Semiconductors
+HO.PA,Thales,Industrials,Aerospace & Defense
+TTE.PA,TotalEnergies,Energy,Integrated Oil & Gas
+URW.PA,Unibail-Rodamco-Westfield,Real Estate,Retail REITs
+VIE.PA,Veolia,Industrials,Multi-Utilities
+DG.PA,Vinci,Industrials,Construction & Engineering

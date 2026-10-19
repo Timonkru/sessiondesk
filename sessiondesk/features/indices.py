@@ -22,7 +22,7 @@ import time
 
 from . import universe
 
-INDEX_SYMBOL = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dax40": "^GDAXI", "dow30": "^DJI"}
+INDEX_SYMBOL = universe.BENCHMARK            # every bundled universe has its index
 PRICE_WEIGHTED = {"dow30"}
 MIN_PE, MAX_PE = 1.0, 400.0
 

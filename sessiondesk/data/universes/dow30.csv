@@ -1,4 +1,4 @@
-# source: Wikipedia, fetched 2026-10-15 - re-run scripts/update_universes.py after index reviews
+# source: Wikipedia, fetched 2026-10-19 - re-run scripts/update_universes.py after index reviews
 symbol,name,sector,industry
 AAPL,Apple Inc.,Information Technology,"Technology Hardware, Storage & Peripherals"
 AMGN,Amgen,Health Care,Biotechnology
