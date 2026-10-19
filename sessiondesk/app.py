@@ -383,6 +383,14 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.extras["extensions"] = await asyncio.to_thread(ext_mod.load_all, ctx)
         return await get_extensions()
 
+    @app.get("/api/extensions/today")
+    async def get_extensions_today():
+        ctx = C()
+
+        async def build():
+            return await ext_mod.today(ctx, ctx.extras["extensions"])
+        return await ctx.cache.get("ext-today", 10, build, swr=False)   # a "loading" answer must not be served again
+
     @app.get("/api/ext/{name}")
     async def get_ext_page(name: str):
         ctx = C()

@@ -1,7 +1,9 @@
-// Today: accounts + prop-rule meter, rule flags, own schedule with release collisions, next releases,
-// forced flows, AI briefing, changes since you last looked, one-line notes.
+// Today: what concerns you now - accounts + prop-rule meter, rule flags, one "next up" timeline (your setups and
+// sessions plus high-impact releases, collisions marked), forced flows, extension blocks, AI briefing, headlines on
+// your positions, changes since you last looked, one-line notes. The full timeline is the Calendar.
 import { api, on } from "../lib/api.js";
 import { h, clear, table, section, num, pct, dir, clock, day, countdown, stamp, note, loading, errorBox, markdown, toast } from "../lib/ui.js";
+import { block } from "../lib/blocks.js";
 
 export async function render(root, _params, ctx) {
   const top = h("div"), left = h("div"), right = h("div");
@@ -9,7 +11,8 @@ export async function render(root, _params, ctx) {
     top, h("div", { class: "cols" }, left, right));
   top.appendChild(loading());
   const brief = h("div"), posNews = h("div"), changes = h("div"), notesBox = h("div");
-  let snap = null;
+  let snap = null, showAll = false;
+  const extBox = h("div");
 
   const load = async () => {
     const d = await api("/api/today", { fresh: true });
@@ -18,7 +21,7 @@ export async function render(root, _params, ctx) {
     const now = Date.now() / 1000;
     const flags = d.flags || [];
     clear(top,
-      d.connected ? section("Accounts", table([
+      d.connected ? section("Accounts", h("div", { class: "scroll" }, table([
         { label: "Account", render: (a) => [a.login, a.fresh === false ? h("span", { class: "warn small" }, ` stale ${Math.round((a.age || 0) / 3600)} h`) : ""] },
         { label: "Equity", num: true, render: (a) => `${num(a.equity, 2)} ${a.currency || ""}` },
         { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : `${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`) },
@@ -29,25 +32,29 @@ export async function render(root, _params, ctx) {
         { label: "Risk at stops", num: true, render: (a) => (a.risk_pct == null ? "–" : pct(a.risk_pct, 2, false)) },
         { label: "Positions", num: true, render: (a) => a.positions },
         { label: "", render: (a) => (a.trade_allowed === false ? h("span", { class: "warn" }, "AutoTrading OFF") : a.risk_multiplier === 0 ? h("span", { class: "warn" }, "day locked") : "") },
-      ], d.accounts || []), note("Limits come from Settings → Prop rules; the day start is the exporter's day-start balance or the first balance SessionDesk saw today.")) : null,
+      ], d.accounts || [])), note("Limits come from Settings → Prop rules; the day start is the exporter's day-start balance or the first balance SessionDesk saw today.")) : null,
       flags.length ? section("Rule flags", h("ul", { class: "feed" }, flags.map((f) => h("li", null, h("span", { class: f.level === "high" ? "warn" : "muted" }, f.level === "high" ? "● " : "○ "), `${f.account}: ${f.text}`)))) : null);
+    // One compact timeline: your setups and sessions plus high-impact releases, by time. The full picture
+    // (all releases, earnings, forced flows) lives in the Calendar.
+    const items = [
+      ...(d.schedule || []).filter((s) => s.in_sec > -1800).map((s) => ({ ts: s.when, kind: s.kind === "session" ? "session" : "setup", tag: s.session, what: s.label, collisions: s.collisions })),
+      ...(d.events || []).filter((e) => e.impact === "high" && e.ts >= now - 1800).map((e) => ({ ts: e.ts, kind: "release", tag: e.currency, what: e.title,
+        extra: [e.forecast ? "fcst " + e.forecast : "", e.actual ? "actual " + e.actual : ""].filter(Boolean).join(" · ") })),
+    ].sort((a, b) => a.ts - b.ts);
+    const shown = showAll ? items : items.slice(0, 10);
+    const KIND = { release: "warn", session: "", setup: "muted" };
     clear(left,
-      section("Schedule", table([
-        { label: "In", render: (s) => (s.in_sec < 0 ? h("span", { class: "muted" }, "passed") : s.in_sec < 3600 ? h("strong", null, countdown(s.in_sec)) : countdown(s.in_sec)) },
-        { label: "At", render: (s) => `${day(s.when) !== day(now) ? day(s.when) + " " : ""}${clock(s.when)}` },
-        { label: "", render: (s) => s.session },
-        { label: "What", render: (s) => h("span", { style: { fontWeight: s.kind === "session" ? 600 : 400 } }, s.label) },
-        { label: "Collides with", render: (s) => (s.collisions && s.collisions.length ? h("span", { class: "warn small" }, s.collisions.join(", ")) : "") },
-      ], (d.schedule || []).filter((s) => s.in_sec > -1800).slice(0, 18), { rowClass: (s) => (s.in_sec >= 0 && s.in_sec < 900 ? "hl" : "") }),
-        note("Add your own times in Settings → Schedule (relative to a cash open or absolute). Holidays of the session's exchange are skipped.")),
-      section("Releases next 36 h", table([
-        { label: "When", render: (e) => (e.ts > now ? (e.ts - now < 86400 ? "in " + countdown(e.ts - now) : day(e.ts) + " " + clock(e.ts)) : clock(e.ts)) },
-        { label: "", render: (e) => e.currency }, { label: "Event", render: (e) => e.title },
-        { label: "Impact", render: (e) => h("span", { class: e.impact === "high" ? "warn" : "muted" }, e.impact) },
-        { label: "Fcst", num: true, render: (e) => e.forecast ?? "" }, { label: "Actual", num: true, render: (e) => e.actual ?? "" },
-      ], d.events || [], { empty: "Nothing scheduled.", onRow: () => ctx.go("#/calendar") })),
-      section("Forced flows next 5 days", table([{ label: "Date", render: (f) => f.date }, { label: "Event", render: (f) => f.name },
-        { label: "Size", render: (f) => h("span", { class: f.size === "high" ? "warn" : "muted" }, f.size) }], d.flows || [], { empty: "None.", onRow: () => ctx.go("#/flows") })));
+      section("Next up", table([
+        { label: "In", render: (x) => (x.ts < now ? h("span", { class: "muted" }, "passed") : x.ts - now < 3600 ? h("strong", null, countdown(x.ts - now)) : countdown(x.ts - now)) },
+        { label: "At", render: (x) => `${day(x.ts) !== day(now) ? day(x.ts) + " " : ""}${clock(x.ts)}` },
+        { label: "", render: (x) => h("span", { class: "small " + (KIND[x.kind] || "") }, x.kind === "release" ? "● " + x.tag : x.tag) },
+        { label: "What", render: (x) => h("span", { style: { fontWeight: x.kind === "setup" ? 400 : 600 } }, x.what) },
+        { label: "", render: (x) => (x.collisions && x.collisions.length ? h("span", { class: "warn small" }, "collides: " + x.collisions.join(", ")) : h("span", { class: "muted small" }, x.extra || "")) },
+      ], shown, { empty: "Nothing scheduled.", rowClass: (x) => (x.ts >= now && x.ts - now < 900 ? "hl" : "") }),
+        h("p", { class: "small" }, items.length > 10 ? h("button", { class: "linkish", onclick: () => { showAll = !showAll; load(); } }, showAll ? "show fewer" : `show all ${items.length}`) : null,
+          items.length > 10 ? " · " : "", h("a", { href: "#/calendar" }, "full timeline in the Calendar"), " · your own times: Settings → Schedule")),
+      (d.flows || []).length ? section("Forced flows next 5 days", h("ul", { class: "feed" }, d.flows.map((f) =>
+        h("li", { class: "click", onclick: () => ctx.go("#/flows") }, h("div", { class: "t" }, `${f.date} · ${f.name}`), h("div", { class: "m" }, f.size + " size"))))) : null);
     ctx.setContext({ page: "Today", accounts: d.accounts, flags, schedule: (d.schedule || []).slice(0, 12), events: d.events, flows: d.flows });
   };
 
@@ -92,10 +99,17 @@ export async function render(root, _params, ctx) {
     clear(notesBox, section("Notes", input, h("ul", { class: "feed" }, (n.items || []).slice(0, 12).map((x) => h("li", null, h("div", { class: "t" }, x.text), h("div", { class: "m" }, stamp(x.ts)))))));
   };
 
-  right.append(brief, posNews, changes, notesBox);
-  await Promise.all([load(), loadBrief(), loadPosNews(), loadChanges(), loadNotes()]);
+  // blocks from your extensions (e.g. a private vola traffic light) sit at the top of the right column
+  const loadExt = async () => {
+    const d = await api("/api/extensions/today", { fresh: true });
+    clear(extBox, (d.blocks || []).map((b) => block(b, b.extension)));
+    const retry = Math.min(...(d.blocks || []).map((b) => b.retry_in || Infinity));   // a block still loading asks for a re-check
+    if (Number.isFinite(retry)) setTimeout(loadExt, Math.max(5, retry) * 1000);
+  };
+  right.append(extBox, brief, posNews, changes, notesBox);
+  await Promise.all([load(), loadExt(), loadBrief(), loadPosNews(), loadChanges(), loadNotes()]);
   const offs = ["position", "level", "price_alert", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") { load(); loadPosNews(); } }));
   offs.push(on("news", ({ item }) => { if ((item.held || []).length) loadPosNews(); }));
-  const t1 = setInterval(load, 15000), t2 = setInterval(loadChanges, 30000);
-  return () => { offs.forEach((f) => f()); clearInterval(t1); clearInterval(t2); };
+  const t1 = setInterval(load, 15000), t2 = setInterval(loadChanges, 30000), t3 = setInterval(loadExt, 60000);
+  return () => { offs.forEach((f) => f()); clearInterval(t1); clearInterval(t2); clearInterval(t3); };
 }

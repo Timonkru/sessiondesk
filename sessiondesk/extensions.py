@@ -10,6 +10,7 @@ Module contract:
     REFRESH = 30                   # optional: seconds between automatic page refreshes (0 = manual only)
     async def page(ctx) -> dict    # {"blocks": [...]} - a plain `def` also works (runs in a worker thread)
     async def action(ctx, payload) -> dict   # optional: receives {"action": ..., "text": ...} from an input block
+    async def today(ctx) -> dict   # optional: {"blocks": [...]} shown on the Today page (keep it quick, cache inside)
 
 Blocks (every value is shown as text, never as HTML; the page's AI context is the same data):
     {"type": "kv", "title": t, "items": [[label, value], ...]}
@@ -116,6 +117,23 @@ async def page(ctx, exts: dict[str, Extension], name: str) -> dict:
     except Exception as exc:
         out = {"error": f"{type(exc).__name__}: {exc}", "trace": traceback.format_exc(limit=4)}
     return {**out, "extension": ext.describe(), "asof": time.time()}
+
+
+TODAY_TIMEOUT = 20
+
+
+async def today(ctx, exts: dict[str, Extension]) -> dict:
+    """Blocks extensions contribute to the Today page, each tagged with its extension. Slow ones are skipped."""
+    async def one(ext):
+        try:
+            fn = ext.module.today
+            res = await asyncio.wait_for(fn(ctx) if inspect.iscoroutinefunction(fn) else asyncio.to_thread(fn, ctx), TODAY_TIMEOUT)
+        except Exception as exc:
+            return [{"type": "note", "text": f"{ext.title}: {type(exc).__name__} {exc}".strip()}]
+        return [{**b, "extension": ext.name} for b in _clean(res).get("blocks", [])]
+    with_today = [e for e in exts.values() if e.module is not None and hasattr(e.module, "today")]
+    parts = await asyncio.gather(*(one(e) for e in with_today))
+    return {"blocks": [b for part in parts for b in part]}
 
 
 async def action(ctx, exts: dict[str, Extension], name: str, payload: dict) -> dict:

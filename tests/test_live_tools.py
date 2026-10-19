@@ -84,3 +84,19 @@ def test_exporter_specs_and_calendar_history(tmp_path):
     hist = asyncio.run(conn.calhist())
     ev = hist["USD|Core CPI m/m"]
     assert len(ev["releases"]) == 2 and ev["releases"][0]["surprise"] == pytest.approx(0.1)
+
+
+def test_level_alerts_one_per_market_and_rearm_only_after_moving_away():
+    s = settings()
+    files = {"FTSE": [("prev day low", 10798.0, "session")]}
+    al = levels.LevelAlerter(cooldown=600)
+    two = lambda a, b: {"UK100": {"symbol": "UK100", "asset": "FTSE", "price": a, "source": "broker"},   # noqa: E731
+                        "UK100.cash": {"symbol": "UK100.cash", "asset": "FTSE", "price": b, "source": "broker"}}
+    al.check(two(10790, 10791), files, s, now=1000)
+    hits = al.check(two(10801, 10802), files, s, now=1005)
+    assert len(hits) == 1                                                  # two symbols, one market, one alert
+    # chopping around the level long after the cooldown: still silent (never 0.1 % = ~10.8 pts away)
+    for i, p in enumerate([10795, 10801, 10794, 10802, 10796]):
+        assert al.check(two(p, p), files, s, now=2000 + 700 * i) == []
+    al.check(two(10812, 10812), files, s, now=6000)                      # moved away: re-armed
+    assert len(al.check(two(10795, 10795), files, s, now=6700)) == 1

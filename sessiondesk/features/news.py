@@ -84,9 +84,20 @@ def classify(item: dict) -> tuple[str, list[str]]:
     return "normal", []
 
 
+_URL = re.compile(r"https?://\S+|www\.\S+")
+
+
+def is_junk(title: str | None) -> bool:
+    """Posts that are only a link (or a few characters once links are removed) carry no headline."""
+    rest = _URL.sub("", title or "").strip(" \t\n-–—|:·•")
+    return len(rest) < 8
+
+
 def prepare(items: list[dict], group: str) -> list[dict]:
     out = []
     for it in items:
+        if is_junk(it.get("title")):
+            continue
         it = dict(it)
         it.setdefault("group", group)
         it["impact"], it["tags"] = classify(it)
@@ -188,6 +199,6 @@ async def poll_keyed(ctx, *, push: bool = True) -> int:
 
 
 async def list_news(ctx, group: str | None, q: str | None, impact: str | None, symbol: str | None, limit: int) -> dict:
-    rows = await ctx.db.run(ctx.db.query_news, group, q, impact, symbol, limit)
+    rows = [r for r in await ctx.db.run(ctx.db.query_news, group, q, impact, symbol, limit) if not is_junk(r.get("title"))]
     rss = ctx.hub.get("rss")
     return {"items": rows, "feed_errors": dict(rss.errors) if rss else {}, "fts": ctx.db.fts}

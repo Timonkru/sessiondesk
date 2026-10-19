@@ -161,20 +161,34 @@ def ladder(prices: dict[str, dict], files: dict, settings) -> list[dict]:
 
 
 class LevelAlerter:
+    """Crossing alerts with two noise guards (live test 19.10.2026: one FTSE level fired 6 times in 50 minutes,
+    each time twice because two accounts quote the same market under two symbols):
+      - one market, one alert: the same level label on GER40 and GER40.cash counts once (keyed by asset);
+      - re-arm only after the price moved away from the level by `level_rearm_pct` (default 0.1 %),
+        so a price chopping around a level does not fire again and again. The cooldown stays as a backstop."""
+
     def __init__(self, cooldown: float = 600):
         self.cooldown = cooldown
         self.last: dict[str, float] = {}
         self.fired: dict[tuple, float] = {}
+        self.disarmed: dict[tuple, float] = {}           # (asset, label) -> level it fired at
+
+    def _rearm(self, asset: str, price: float, pct: float) -> None:
+        for mark, level in list(self.disarmed.items()):
+            if mark[0] == asset and level and abs(price - level) / abs(level) * 100 >= pct:
+                del self.disarmed[mark]
 
     def check(self, prices: dict[str, dict], files: dict, settings, now: float | None = None) -> list[dict]:
         now = now or time.time()
         out = []
+        rearm_pct = float(settings.get("level_rearm_pct") or 0.1)
         self.last = {k: v for k, v in self.last.items() if k in prices}      # reconnect = new baseline, no alert across gaps
         for key, q in prices.items():
             price, before = q.get("price"), self.last.get(key)
             if not price:
                 continue
             self.last[key] = price
+            self._rearm(q["asset"], price, rearm_pct)
             if before is None or before == price:
                 continue
             lv = levels_for(q["asset"], before, q, files, settings)
@@ -186,10 +200,11 @@ class LevelAlerter:
                     lv.append((f"round {k * step:g}", k * step, "round numbers"))
             for label, level, src in dict.fromkeys(lv):
                 if (before - level) * (price - level) < 0 or (price == level != before):
-                    mark = (key, label, round(level, 6))
-                    if now - self.fired.get(mark, 0) < self.cooldown:
+                    mark = (q["asset"], label)
+                    if mark in self.disarmed or now - self.fired.get(mark, 0) < self.cooldown:
                         continue
                     self.fired[mark] = now
+                    self.disarmed[mark] = level
                     out.append({"id": stable_id("level", key, label, round(level, 6), int(now // self.cooldown)), "ts": now,
                                 "symbol": q["symbol"], "asset": q["asset"], "label": label, "level": level, "src": src,
                                 "price": price, "direction": "up" if price > before else "down", "source": q.get("source")})

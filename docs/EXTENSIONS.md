@@ -33,7 +33,14 @@ async def page(ctx) -> dict: # or a plain def (runs in a worker thread)
 
 async def action(ctx, payload) -> dict:   # optional, called by an "input" block
     return {"message": "saved"}
+
+async def today(ctx) -> dict:             # optional: blocks shown at the top of the Today page
+    return {"blocks": [...]}               # keep it quick (20 s limit): answer from your cache, refresh in the background
 ```
+
+A Today block that is still loading can carry `"retry_in": 15`; the Today page then asks again after that
+many seconds. If you start background work with `asyncio.ensure_future`, keep a reference to the task
+(asyncio holds tasks only weakly).
 
 `page()` gets the same context object the built-in pages use: `ctx.settings`, `ctx.cache`
 (`await ctx.cache.get(key, ttl_seconds, async_builder)` caches and de-duplicates), `ctx.http`

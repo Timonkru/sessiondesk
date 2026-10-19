@@ -299,6 +299,11 @@ window.addEventListener("sd:system", (e) => showSystem(e.detail));
 setTimeout(pollSystem, 20000);
 setInterval(pollSystem, 120000);
 
+// Back: the app window (--app) has no browser bar, so the desk brings its own. Only shown once there is a page to go back to.
+let depth = 0;
+window.addEventListener("hashchange", () => { depth += 1; $("back").hidden = depth < 1; });
+$("back").addEventListener("click", () => { depth = Math.max(0, depth - 2); history.back(); });
+
 window.addEventListener("hashchange", route);
 connect((live) => { const c = $("conn"); c.textContent = live ? "live" : "offline"; c.className = live ? "live" : "off"; });
 wirePush();

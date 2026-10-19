@@ -44,3 +44,10 @@ def test_ingest_pushes_medium_headline_on_open_position(tmp_path, monkeypatch):
     pushed = asyncio.run(news.ingest(ctx, items, "markets", push=True))
     assert [p["id"] for p in pushed] == ["a"]                      # medium + touches DAX; b touches nothing; c is old
     assert seen[0]["kind"] == "news" and seen[0]["item"]["held"] == ["DAX"]
+
+
+def test_link_only_posts_are_dropped():
+    assert news.is_junk("https://t.co/9ig93SSoTr") and news.is_junk("  https://a.b/c  https://d.e ") and news.is_junk("")
+    assert not news.is_junk("French PM: state of emergency possible https://t.co/x")
+    kept = news.prepare([{"id": "1", "title": "https://t.co/abc"}, {"id": "2", "title": "ECB hikes by 25 bp"}], "squawk")
+    assert [k["id"] for k in kept] == ["2"]
