@@ -447,6 +447,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     @app.get("/api/macro/{panel}")
     async def get_macro(panel: str):
         fn = {"rates": macro.rates, "fedpath": macro.fed_path, "vol": macro.vol, "risk": macro.risk_ratios, "cot": macro.cot,
+              "growth": macro.growth, "credit": macro.credit,
               "putcall": indices.putcall, "factset": indices.factset}.get(panel)
         if not fn:
             return {"error": "unknown panel"}

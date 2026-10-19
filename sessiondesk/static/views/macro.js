@@ -1,14 +1,35 @@
-// Macro: US curve, Fed path, volatility structure, risk appetite ratios, put/call, COT positioning.
+// Macro in five tabs: rates (curve, Fed path), inflation & growth, credit & liquidity (incl. euro spreads),
+// volatility & risk appetite (VIX structure, ratios, put/call), positioning (COT). All panels load once; the
+// tabs only show and hide them, so the AI context always holds everything.
 import { api } from "../lib/api.js";
 import { lineChart, bars } from "../lib/chart.js";
-import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBox, big } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
-  const a = h("div"), b = h("div");
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Macro")), h("div", { class: "cols" }, a, b));
-  const rates = h("div", null, loading()), fed = h("div", null, loading()), vol = h("div", null, loading()), risk = h("div", null, loading()), pc = h("div", null, loading()), cot = h("div", null, loading());
-  a.append(section("US Treasury curve", rates), section("Fed funds path (futures)", fed));
-  b.append(section("Volatility", vol), section("Risk appetite", risk), section("Put/call (SPY, QQQ options)", pc), section("Positioning (COT)", cot));
+  const mk = () => h("div", null, loading());
+  const rates = mk(), fed = mk(), vol = mk(), risk = mk(), pc = mk(), cot = mk(), growth = mk(), credit = mk(), euro = mk();
+  const TABS = [
+    ["rates", "Rates", h("div", { class: "cols" }, section("US Treasury curve", rates), section("Fed funds path (futures)", fed))],
+    ["growth", "Inflation & growth", section(null, growth)],
+    ["credit", "Credit & liquidity", h("div", { class: "cols" }, section("US credit and liquidity", credit), section("Euro area: 10-year yields and spreads to Germany", euro))],
+    ["risk", "Volatility & risk", h("div", { class: "cols" }, h("div", null, section("Volatility", vol), section("Put/call (SPY, QQQ options)", pc)), section("Risk appetite", risk))],
+    ["pos", "Positioning", section("Positioning (COT)", cot)],
+  ];
+  let tab = localStorage.getItem("sd.macroTab") || "rates";
+  const bar = h("div", { class: "tabs" });
+  const panes = h("div", null, TABS.map(([k, , el]) => h("div", { dataset: { tab: k } }, el)));
+  const show = () => {
+    clear(bar, TABS.map(([k, label]) => h("button", { class: k === tab ? "on" : "", onclick: () => { tab = k; localStorage.setItem("sd.macroTab", k); show(); } }, label)));
+    [...panes.children].forEach((el) => { el.hidden = el.dataset.tab !== tab; });
+  };
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Macro")), bar, panes);
+  show();
+
+  const fredTable = (rows, fmt) => table([{ label: "Series", render: (x) => x.label },
+    { label: "Latest", num: true, render: (x) => fmt(x, x.value) }, { label: "Before", num: true, render: (x) => (x.prev == null ? "–" : fmt(x, x.prev)) },
+    { label: "Change", num: true, cls: (x) => dir(x.change), render: (x) => (x.change == null ? "–" : (x.change > 0 ? "+" : "") + fmt(x, x.change)) },
+    { label: "Period", render: (x) => h("span", { class: "muted small" }, x.date) }], rows);
+  const fmtVal = (x, v) => (x.id === "ICSA" ? big(v) : x.id === "PAYEMS" ? num(v, 0) + " k" : num(v, Math.abs(v) >= 100 ? 0 : 2));
   const facts = {};
   const push = () => ctx.setContext({ page: "Macro", ...facts });
 
@@ -19,6 +40,25 @@ export async function render(root, _params, ctx) {
     clear(pc, table([{ label: "ETF", render: (x) => x.symbol }, { label: "P/C volume", num: true, render: (x) => num(x.pc_volume, 2) },
       { label: "P/C open interest", num: true, render: (x) => num(x.pc_oi, 2) },
       { label: "Expiries", render: (x) => h("span", { class: "muted small" }, (x.expiries || []).join(", ")) }], o.rows), note(o.note));
+    push();
+  });
+  // inflation & growth, credit & liquidity: FRED, loaded on their own
+  api("/api/macro/growth", { ttl: 600000 }).then((g) => {
+    if (g.error) { clear(growth, errorBox(g.error)); return; }
+    facts.inflation_growth = g.rows;
+    clear(growth, fredTable(g.rows, fmtVal), note(`${g.source}. Changes are against the previous release of each series.`));
+    push();
+  });
+  api("/api/macro/credit", { ttl: 600000 }).then((x) => {
+    if (x.error) { clear(credit, errorBox(x.error)); clear(euro); return; }
+    facts.credit_liquidity = x.rows;
+    clear(credit, fredTable(x.rows, fmtVal), note(`${x.source}. Spreads in percentage points over Treasuries; NFCI is a weekly index of US financial conditions.`));
+    const e = x.euro || {};
+    facts.euro_spreads = e.rows;
+    clear(euro, e.error ? errorBox(e.error) : h("div", null, table([{ label: "Country", render: (r) => r.country },
+      { label: "10y yield", num: true, render: (r) => num(r.yield, 2) + "%" },
+      { label: "Spread to Germany", num: true, render: (r) => (r.spread_bp == null ? "–" : num(r.spread_bp, 0) + " bp") },
+      { label: "Month", render: (r) => h("span", { class: "muted small" }, r.date) }], e.rows || []), note(e.note)));
     push();
   });
   const [r, f, v, k, c] = await Promise.all(["rates", "fedpath", "vol", "risk", "cot"].map((p) => api("/api/macro/" + p, { ttl: 120000 })));
