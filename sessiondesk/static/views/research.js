@@ -1,4 +1,5 @@
-// Research: feed of research/blog sources, clean reader view, reading list, AI summary.
+// Research: recommended items (open positions, watchlist, saved topics), feed of research/blog sources,
+// clean reader view, reading list, AI summary.
 import { api } from "../lib/api.js";
 import { h, clear, day, ago, note, loading, errorBox, markdown, ext } from "../lib/ui.js";
 
@@ -20,13 +21,19 @@ export async function render(root, params, ctx) {
     const sel = h("select", { onchange: (e) => { source = e.target.value; drawList(); } }, sources.map((s) => h("option", { value: s, selected: s === source }, s === "all" ? "All sources" : s === "saved" ? "Reading list" : s)));
     let items = source === "saved" ? (data.saved || []).map((s) => ({ title: s.title, url: s.url, source: s.source, published: s.saved }))
                                    : (data.items || []).filter((i) => source === "all" || i.source === source);
+    const rec = source === "all" && !query ? (data.recommended || []) : [];
     clear(listCol, h("div", { class: "toolbar" }, sel, search),
+      rec.length ? h("div", { class: "block" }, h("h2", null, "Recommended for you"), h("ul", { class: "feed" }, rec.map((i) => h("li", { class: "click", onclick: () => open(i.url, i) },
+        h("div", { class: "t" }, i.title), h("div", { class: "m" }, `${day(i.published)} · ${i.source} · `, h("span", { class: "warn" }, i.why.join(" · ")))))))
+        : source === "all" && !query ? note("Recommended for you: nothing right now. Picks come from your open positions (their markets' themes), companies on your watchlist named in an item, and topics of articles you saved to the reading list.") : null,
+      rec.length ? h("h2", null, "All research") : null,
       items.length ? h("ul", { class: "feed" }, items.slice(0, 150).map((i) => h("li", { class: "click", onclick: () => open(i.url, i) },
         h("div", { class: "t" }, i.title), h("div", { class: "m" }, `${day(i.published)} · ${i.source}`),
         i.summary ? h("div", { class: "small muted" }, i.summary.slice(0, 220)) : null)))
         : note(source === "saved" ? "Nothing saved yet." : "No research items yet - feeds load in the background shortly after start. Edit the source list in Settings → Feeds."),
       note("Sources: " + (data.sources || []).join(", ")));
-    ctx.setContext({ page: "Research list", items: items.slice(0, 40).map((i) => ({ title: i.title, source: i.source, summary: i.summary })) });
+    ctx.setContext({ page: "Research list", recommended: rec.map((i) => ({ title: i.title, source: i.source, why: i.why })),
+      items: items.slice(0, 40).map((i) => ({ title: i.title, source: i.source, summary: i.summary })) });
   };
 
   let current = null;

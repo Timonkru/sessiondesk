@@ -166,3 +166,20 @@ def test_telegram_preview_parser():
     items = parse_telegram(page, "Chan", "chan")
     assert [i["title"] for i in items] == ["FED'S WALLER: CUTS STILL APPROPRIATE", "US CPI MoM Actual 0.4% (Forecast 0.2%)"]
     assert items[0]["url"] == "https://t.me/chan/102" and items[1]["published"] < items[0]["published"]
+
+
+def test_research_recommendations_say_why():
+    from sessiondesk.features import news
+    now = 1_790_000_000.0
+    items = [{"title": "What the ECB's next step means for European equities", "published": now - 3600, "symbols": []},
+             {"title": "Nvidia's data center margins under the microscope", "published": now - 7200, "symbols": ["NVDA"]},
+             {"title": "A history of the yen carry trade", "published": now - 86400, "symbols": []},
+             {"title": "ECB minutes, old news", "published": now - 30 * 86400, "symbols": []}]
+    held = news.held_map([{"symbol": "GER40.cash"}])
+    rec = research.recommend(items, held, {"NVDA"}, ["Why the yen matters again"], now)
+    why = {r["title"][:12]: r["why"] for r in rec}
+    assert why["What the ECB"] == ["touches your open DAX"]
+    assert why["Nvidia's dat"] == ["names NVDA (watchlist)"]
+    assert why["A history of"] == ["topic you saved before: japan"]
+    assert "ECB minutes," not in why                                   # older than 14 days
+    assert rec[0]["title"].startswith("What the ECB")                 # positions weigh most

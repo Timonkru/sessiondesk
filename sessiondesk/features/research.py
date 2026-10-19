@@ -114,8 +114,49 @@ def _pdf(content: bytes, url: str) -> dict:
             "note": None}
 
 
+def recommend(items: list[dict], held: dict[str, set], watch: set[str], saved_titles: list[str], now: float,
+              max_age_days: float = 14, limit: int = 8) -> list[dict]:
+    """Research items ranked by what concerns you: open positions (market themes), watchlist names, topics of the
+    articles you saved; newer counts more. Every pick says why. Pure, tested."""
+    from .assets import themes_of
+    from .news import match_held
+    saved_themes: dict[str, int] = {}
+    for t in saved_titles:
+        for th in themes_of(t) - {"risk"}:
+            saved_themes[th] = saved_themes.get(th, 0) + 1
+    out = []
+    for it in items:
+        age_days = (now - (it.get("published") or now)) / 86400
+        if age_days > max_age_days:
+            continue
+        text = {"title": f"{it.get('title', '')} {(it.get('summary') or '')[:300]}", "symbols": it.get("symbols") or []}
+        why, score = [], 0.0
+        touched = match_held(text, held) if held else []
+        if touched:
+            score += 3
+            why.append("touches your open " + ", ".join(touched))
+        names = sorted(set(it.get("symbols") or []) & watch)
+        if names:
+            score += 2
+            why.append("names " + ", ".join(names) + " (watchlist)")
+        topics = sorted((themes_of(text["title"]) - {"risk"}) & set(saved_themes))
+        if topics:
+            score += 1
+            why.append("topic you saved before: " + ", ".join(topics))
+        if score:
+            out.append({**it, "score": score - age_days / 7, "why": why})
+    return sorted(out, key=lambda x: -x["score"])[:limit]
+
+
 async def feed(ctx, q: str | None = None, limit: int = 120) -> dict:
     rows = await ctx.db.run(ctx.db.query_news, "research", q, None, None, limit)
     rss = ctx.hub.get("rss")
     sources = [f["name"] for f in rss.feeds("research")] if rss else []
-    return {"items": rows, "sources": sources, "saved": await ctx.db.run(ctx.db.saved), "asof": time.time()}
+    saved = await ctx.db.run(ctx.db.saved)
+    out = {"items": rows, "sources": sources, "saved": saved, "asof": time.time()}
+    if not q:
+        from .news import held
+        held_map = await held(ctx)
+        watch = {s.upper() for s in (ctx.settings.get("watchlist") or [])}
+        out["recommended"] = recommend(rows, held_map, watch, [s.get("title") or "" for s in saved], time.time())
+    return out
