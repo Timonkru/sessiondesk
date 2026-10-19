@@ -52,15 +52,29 @@ export async function render(root, params, ctx) {
       ? [sym, move, { label: "Weight", num: true, render: (r) => pct((r.weight || 0) * 100, 2, false) },
           { label: "Contribution", num: true, cls: (r) => dir(r.contrib_pct), render: (r) => signed(r.contrib_pct, 3) + " pp" }]
       : [sym, move, { label: "Price", num: true, render: (r) => price(r.last) }];
-  const driverBox = h("div", { class: "cols" },
-    h("div", null, h("h3", null, pw || cap ? "Pulling up" : "Biggest gainers"), table(cols, d.drivers_up || [], { onRow: (r) => ctx.go("#/stock/" + encodeURIComponent(r.symbol)) })),
-    h("div", null, h("h3", null, pw || cap ? "Pulling down" : "Biggest losers"), table(cols, d.drivers_down || [], { onRow: (r) => ctx.go("#/stock/" + encodeURIComponent(r.symbol)) })));
-  const driverNote = pw
-    ? "The Dow is price-weighted: each member's dollar move times the same divisor, so a $10 move in a $500 stock counts as much as a $10 move in a $50 stock. Points are the member's share of today's point move."
-    : cap
-      ? "Contribution ≈ market-cap weight × move, in percentage points of the index move. Weights from cached company profiles (free data), not the official index weights, caps or free-float factors" +
-        (d.contrib_total != null ? `. Check: the contributions of all members with a known cap add up to ${signed(d.contrib_total, 2)} pp against an index move of ${pct(d.index_move_pct)}.` : ".")
-      : "No market caps for this index in the free set (500 profiles are too slow to fetch), so these are the biggest movers, not weighted contributions.";
+  const PERIODS = [["1d", "1 day"], ["1w", "1 week"], ["1m", "1 month"]];
+  let period = localStorage.getItem("sd.idxPeriod") || "1d";
+  const periodBar = h("div", { class: "toolbar" });
+  const driverBox = h("div");
+  const drawDrivers = () => {
+    const blk = (d.drivers_by_period || {})[period] || d;
+    clear(periodBar, PERIODS.map(([k, label]) => h("button", { class: "linkish", style: { fontWeight: k === period ? 700 : 400 },
+      onclick: () => { period = k; localStorage.setItem("sd.idxPeriod", k); drawDrivers(); } }, label)),
+      h("span", { class: "muted small" }, `  ${d.name} ${pct(blk.index_move_pct)} (${signed(blk.index_points, 1)} pts) over ${blk.sessions || 1} session${(blk.sessions || 1) > 1 ? "s" : ""}`));
+    const word = period === "1d" ? "today's" : period === "1w" ? "this week's" : "this month's";
+    const driverNote = pw
+      ? `The Dow is price-weighted: index points = a member's dollar move / the Dow divisor${blk.divisor ? ` (${num(blk.divisor, 4)}, from prices and index level)` : ""}, so a $10 move in a $500 stock counts as much as a $10 move in a $50 stock.` +
+        (blk.contrib_total != null ? ` Check: the members add up to ${signed(blk.contrib_total, 1)} pts against ${word} ${signed(blk.index_points, 1)} pts; a gap means the index quote and the member quotes are from slightly different times.` : "")
+      : cap
+        ? "Contribution ≈ market-cap weight × move, in percentage points of the index move. Weights from cached company profiles (free data), not the official index weights, caps or free-float factors" +
+          (blk.contrib_total != null ? `. Check: the contributions of all members with a known cap add up to ${signed(blk.contrib_total, 2)} pp against an index move of ${pct(blk.index_move_pct)}.` : ".")
+        : "No market caps for this index in the free set (500 profiles are too slow to fetch), so these are the biggest movers, not weighted contributions.";
+    clear(driverBox, h("div", { class: "cols" },
+      h("div", null, h("h3", null, pw || cap ? "Pulling up" : "Biggest gainers"), table(cols, blk.drivers_up || [], { onRow: (r) => ctx.go("#/stock/" + encodeURIComponent(r.symbol)) })),
+      h("div", null, h("h3", null, pw || cap ? "Pulling down" : "Biggest losers"), table(cols, blk.drivers_down || [], { onRow: (r) => ctx.go("#/stock/" + encodeURIComponent(r.symbol)) }))),
+      note(driverNote));
+  };
+  drawDrivers();
 
   // ---------------------------------------------------------------- valuation
   const v = d.valuation, fs = d.factset;
@@ -101,14 +115,16 @@ export async function render(root, params, ctx) {
 
   clear(body,
     section("Breadth", breadthBox, chartBox),
-    section("Who moves the index", driverBox, note(driverNote)),
+    section("Who moves the index", periodBar, driverBox),
     section("Valuation", valBox.childNodes.length ? valBox : note("No valuation data.")),
     note(`${d.note} Updated ${ago(d.asof)} ago. Breadth describes participation; on its own it has not been a reliable timing signal.`));
 
   ctx.setContext({
     page: `Indices & breadth - ${d.name}`, index: d.name, index_move_pct: d.index_move_pct, index_points: d.index_points,
     breadth: { ...b, line: undefined, index_line: undefined, breadth_line_last5: line.slice(-5) },
-    drivers_up: (d.drivers_up || []).slice(0, 8), drivers_down: (d.drivers_down || []).slice(0, 8),
+    drivers_by_period: Object.fromEntries(Object.entries(d.drivers_by_period || {}).map(([k, x]) => [k, { index_move_pct: x.index_move_pct, index_points: x.index_points,
+      up: (x.drivers_up || []).slice(0, 6).map((r) => ({ symbol: r.symbol, pct: r.pct, points: r.points, contrib_pct: r.contrib_pct })),
+      down: (x.drivers_down || []).slice(0, 6).map((r) => ({ symbol: r.symbol, pct: r.pct, points: r.points, contrib_pct: r.contrib_pct })) }])),
     valuation: v, factset: fs,
   });
 }

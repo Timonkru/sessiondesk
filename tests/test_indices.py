@@ -41,11 +41,17 @@ def test_breadth_skips_short_histories():
     assert b["n"] == 2 and len(b["line"]) == 61
 
 
-def test_drivers_price_weighted_split_the_point_move():
+def test_drivers_price_weighted_use_the_divisor():
     rows = [{"symbol": "A", "pct": 1.0, "abs": 6.0}, {"symbol": "B", "pct": -1.0, "abs": -2.0}]
-    out = indices.drivers(rows, {}, True, 40.0)
+    out = indices.drivers(rows, {}, True, 0.1)                       # divisor 0.1: $1 = 10 index points
     assert [r["symbol"] for r in out] == ["B", "A"]
     assert out[1]["points"] == pytest.approx(60.0) and out[0]["points"] == pytest.approx(-20.0)
+    # signs follow the member's own move even if the index quote disagrees (live test 19.10.2026)
+    idx = [1000.0, 1010.0]                                            # index up while the members' dollar sum is down
+    closes = {"UP": [100.0, 101.0], "DOWN": [200.0, 195.0]}
+    blk = indices.driver_block(indices.period_rows(closes, 1), {}, True, idx, 1)
+    assert blk["drivers_up"][0]["symbol"] == "UP" and blk["drivers_down"][0]["symbol"] == "DOWN"
+    assert blk["contrib_total"] < 0 < blk["index_points"]             # the gap is shown, not hidden
 
 
 def test_drivers_cap_weighted_and_missing_caps():
@@ -102,3 +108,16 @@ def test_parse_factset_sentences():
     assert out["fwd_eps"] == pytest.approx(6712.45 / 22.4)
     with pytest.raises(ValueError):
         indices.parse_factset("a report without the sentence")
+
+
+def test_drivers_over_a_week_and_a_month():
+    closes = {"UP": [100.0] * 30 + [110.0] * 5, "DOWN": [50.0] * 30 + [45.0] * 5}
+    idx = [1500.0] * 30 + [1550.0] * 5                             # = price sum / 0.1, a consistent price-weighted index
+    rows = indices.period_rows(closes, 5)                         # five sessions back is the last 100 / 50
+    assert {r["symbol"]: round(r["pct"], 1) for r in rows} == {"UP": 10.0, "DOWN": -10.0}
+    blk = indices.driver_block(rows, {}, True, idx, 5)
+    assert blk["index_points"] == 50.0 and blk["sessions"] == 5 and blk["divisor"] == pytest.approx(0.1)
+    assert blk["drivers_up"][0]["symbol"] == "UP" and blk["drivers_up"][0]["points"] == pytest.approx(100.0)
+    assert blk["contrib_total"] == pytest.approx(blk["index_points"])
+    assert indices.driver_block(indices.period_rows(closes, 1), {}, True, idx, 1)["index_points"] == 0.0   # flat last session
+    assert indices.period_rows({"SHORT": [1.0, 2.0]}, 5) == []

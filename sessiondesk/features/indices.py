@@ -92,14 +92,14 @@ def breadth(closes: dict[str, list[float]], index_closes: list[float]) -> dict:
     return out
 
 
-def drivers(rows: list[dict], caps: dict[str, float], price_weighted: bool, index_points: float | None) -> list[dict]:
-    """Contribution per member. Dow: dollar move share of the point move. Cap-weighted: move x cap share."""
+def drivers(rows: list[dict], caps: dict[str, float], price_weighted: bool, divisor: float | None) -> list[dict]:
+    """Contribution per member. Dow: dollar move / Dow divisor = index points (the index's own definition).
+    Cap-weighted: move x cap share. (Live test 19.10.2026: sharing out the index's point move by dollar moves flipped
+    every sign when the index quote and the member quotes were taken at slightly different times.)"""
     out = []
     if price_weighted:
-        total = sum(r["abs"] for r in rows)
         for r in rows:
-            share = r["abs"] / total if total else None
-            out.append({**r, "points": share * index_points if share is not None and index_points is not None else None, "basis": "dollar move"})
+            out.append({**r, "points": r["abs"] / divisor if divisor else None, "basis": "dollar move / divisor"})
     else:
         total_cap = sum(caps.get(r["symbol"], 0) for r in rows)
         for r in rows:
@@ -125,6 +125,32 @@ def class_caps(profiles: list[dict]) -> dict[str, float]:
         if cap:
             out[p["symbol"]] = cap
     return out
+
+
+PERIODS = {"1d": 1, "1w": 5, "1m": 21}                # trading sessions per period
+
+
+def period_rows(closes: dict[str, list[float]], k: int) -> list[dict]:
+    """Per member: move over the last k sessions (percent and price units)."""
+    out = []
+    for sym, c in closes.items():
+        if len(c) > k and c[-1 - k]:
+            out.append({"symbol": sym, "pct": (c[-1] / c[-1 - k] - 1) * 100, "abs": c[-1] - c[-1 - k], "last": c[-1]})
+    return out
+
+
+def driver_block(rows: list[dict], caps: dict, price_weighted: bool, idx: list[float], k: int) -> dict:
+    points = (idx[-1] - idx[-1 - k]) if len(idx) > k else None
+    # Dow divisor from the data itself: sum of member prices / index level (exact by definition, up to quote timing)
+    divisor = sum(r["last"] for r in rows) / idx[-1] if price_weighted and idx and idx[-1] else None
+    drv = drivers(rows, caps, price_weighted, divisor)
+    sort_key = "points" if price_weighted else "contrib_pct"
+    if not drv:                                           # no caps (S&P 500 in the free set): plain movers instead
+        drv, sort_key = sorted(rows, key=lambda r: r["pct"]), "pct"
+    return {"sessions": k, "index_move_pct": (idx[-1] / idx[-1 - k] - 1) * 100 if len(idx) > k and idx[-1 - k] else None,
+            "index_points": points, "contrib_total": sum(r[sort_key] for r in drv) if sort_key in ("contrib_pct", "points") else None,
+            "divisor": divisor,
+            "drivers_down": [r for r in drv if r[sort_key] < 0][:8], "drivers_up": [r for r in drv[::-1] if r[sort_key] > 0][:8]}
 
 
 def aggregate_pe(profiles: list[dict], price_weighted: bool) -> dict | None:
@@ -294,22 +320,20 @@ async def index_view(ctx, key: str) -> dict:
         profiles = [{**p, "symbol": s} for s, p in zip(members, res) if "error" not in p]
     caps = class_caps(profiles)
     profiles = [{**p, "market_cap": caps.get(p["symbol"], p.get("market_cap"))} for p in profiles]
-    points = (idx[-1] - idx[-2]) if len(idx) >= 2 else None
-    rows = b.pop("rows")
-    drv = drivers(rows, caps, key in PRICE_WEIGHTED, points)
-    sort_key = "points" if key in PRICE_WEIGHTED else "contrib_pct"
-    if not drv:                                           # no caps (S&P 500 in the free set): plain movers instead
-        drv, sort_key = sorted(rows, key=lambda r: r["pct"]), "pct"
+    b.pop("rows")
+    pw = key in PRICE_WEIGHTED
+    by_period = {name: driver_block(period_rows(closes, k), caps, pw, idx, k) for name, k in PERIODS.items()}
+    today_block = by_period["1d"]
     val = aggregate_pe(profiles, key in PRICE_WEIGHTED) if profiles else None
     if val:
         val["history"] = record_history(ctx.data_dir / "valuation_history.jsonl", universe.UNIVERSES[key], val["fwd_pe"],
                                         dt.date.today().isoformat())
     out = {"key": key, "name": universe.UNIVERSES[key], "symbol": INDEX_SYMBOL[key], "breadth": b,
-           "index_move_pct": (idx[-1] / idx[-2] - 1) * 100 if len(idx) >= 2 else None, "index_points": points,
-           "contrib_total": sum(r[sort_key] for r in drv) if sort_key == "contrib_pct" else None,
-           "drivers_down": [r for r in drv if r[sort_key] < 0][:8], "drivers_up": [r for r in drv[::-1] if r[sort_key] > 0][:8], "valuation": val, "asof": time.time(),
+           **{k: today_block[k] for k in ("index_move_pct", "index_points", "contrib_total", "drivers_down", "drivers_up")},
+           "drivers_by_period": by_period, "valuation": val, "asof": time.time(),
            "note": "Breadth and the breadth line use one year of daily closes (free data, refreshed hourly, today's value live). "
-                   "Contributions for cap-weighted indices are approximations from market caps."}
+                   "Contributions for cap-weighted indices are approximations from today's market caps (over a week or a month "
+                   "the true weights drift a little)."}
     if key == "sp500":
         out["factset"] = await factset(ctx)
     return out
