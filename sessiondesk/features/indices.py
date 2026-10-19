@@ -251,9 +251,9 @@ async def putcall(ctx) -> dict:
 
 
 # ------------------------------------------------------------------ assembly
-async def index_view(ctx, key: str) -> dict:
-    if key not in INDEX_SYMBOL:
-        return {"error": "unknown index"}
+async def member_closes(ctx, key: str) -> dict:
+    """{"closes": {member: [1y daily closes, last = live price]}, "index": [...]} - shared with the screener.
+    The year of closes is cached for an hour (disk too); today's value comes from the live quote service."""
     members = [m["symbol"] for m in universe.members(key)]
     yahoo = ctx.hub.get("yahoo")
 
@@ -263,17 +263,27 @@ async def index_view(ctx, key: str) -> dict:
     data = await ctx.cache.get(f"idx:closes:{key}", 3600, build_closes, disk=True)
     if "error" in data:
         return data
-    closes = data["closes"]
+    closes = {k: list(v) for k, v in data["closes"].items()}          # copy: the cached lists stay untouched
     idx = closes.pop(INDEX_SYMBOL[key], [])
-    # today's last prices from the live quote service (the 1y closes are refreshed hourly)
     from .markets import get_quotes
     live = await get_quotes(ctx, members + [INDEX_SYMBOL[key]], intraday=False)
     q = live.get("quotes", {})
     for sym in list(closes):
-        if sym in q and closes[sym]:
+        if sym in q and closes[sym] and q[sym].get("price") is not None:
             closes[sym] = closes[sym][:-1] + [q[sym]["price"]]
-    if idx and INDEX_SYMBOL[key] in q:
+    if idx and INDEX_SYMBOL[key] in q and q[INDEX_SYMBOL[key]].get("price") is not None:
         idx = idx[:-1] + [q[INDEX_SYMBOL[key]]["price"]]
+    return {"closes": closes, "index": idx}
+
+
+async def index_view(ctx, key: str) -> dict:
+    if key not in INDEX_SYMBOL:
+        return {"error": "unknown index"}
+    members = [m["symbol"] for m in universe.members(key)]
+    data = await member_closes(ctx, key)
+    if "error" in data:
+        return data
+    closes, idx = data["closes"], data["index"]
     b = breadth(closes, idx)
     if not b:
         return {"error": "not enough member history"}

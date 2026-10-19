@@ -399,6 +399,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.cache.invalidate(f"ext:{name}")
         return res
 
+    @app.get("/api/screener/{key}")
+    async def get_screener(key: str):
+        from .features import screener
+        ctx = C()
+
+        async def build():
+            return await screener.screen(ctx, key)
+        return await ctx.cache.get(f"screen:{key}", 60, build)
+
     @app.get("/api/macro/{panel}")
     async def get_macro(panel: str):
         fn = {"rates": macro.rates, "fedpath": macro.fed_path, "vol": macro.vol, "risk": macro.risk_ratios, "cot": macro.cot,

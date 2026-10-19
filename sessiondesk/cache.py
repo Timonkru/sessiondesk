@@ -70,9 +70,15 @@ class Cache:
             pass
 
     # ---------------------------------------------------------------- core
-    def peek(self, key: str) -> dict | None:
+    def peek(self, key: str, *, disk: bool = False) -> dict | None:
+        """Cached value regardless of age, or None. disk=True also reads the disk copy (no fetch)."""
         entry = self._mem.get(key)
-        return entry.value if entry and entry.has_value else None
+        if entry and entry.has_value:
+            return entry.value
+        if disk:
+            entry = self._load_disk(key)
+            return entry.value if entry else None
+        return None
 
     def invalidate(self, prefix: str = "") -> None:
         for key in [k for k in self._mem if k.startswith(prefix)]:

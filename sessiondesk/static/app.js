@@ -22,6 +22,7 @@ const VIEWS = {
   help: () => import("./views/help.js"),
   ext: () => import("./views/ext.js"),
   system: () => import("./views/system.js"),
+  screener: () => import("./views/screener.js"),
 };
 
 const $ = (id) => document.getElementById(id);
