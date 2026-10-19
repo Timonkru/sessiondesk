@@ -390,6 +390,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def reload_extensions():
         ctx = C()
         ctx.extras["extensions"] = await asyncio.to_thread(ext_mod.load_all, ctx)
+        ctx.cache.invalidate("ext")                         # pages and Today blocks of the reloaded code, not the old one
         return await get_extensions()
 
     @app.get("/api/extensions/today")
