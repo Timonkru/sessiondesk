@@ -117,6 +117,7 @@ export async function render(root, _params, ctx) {
     ["level_markets", "Level markets without broker quotes", '["DAX", "NQ", "DOW", "SPX", "GOLD"]'],
     ["round_steps", "Round-number steps", '{"DAX": 500, "GOLD": 50}'],
     ["magic_names", "Setup names per EA magic number", '{"123456": "Opening breakout"}'],
+    ["copy_magics", "Magic numbers of trade copiers (their copies are hidden in the Journal)", '["987654"]'],
     ["asset_patterns", "Extra broker symbol patterns", '{"DAX": ["DE40.CASH"]}'],
     ["scenario_drivers", "Scenario driver markets", '["NQ", "DAX"]'],
   ];

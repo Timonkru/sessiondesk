@@ -71,3 +71,26 @@ def test_today_endpoint_without_broker(client):
     assert d["connected"] is False and isinstance(d["schedule"], list) and "flows" in d
     assert client.post("/api/notes", json={"text": "test note"}).json()["items"][0]["text"] == "test note"
     assert any(a["kind"] == "note" for a in client.get("/api/activity").json()["items"])
+
+
+def test_journal_keeps_accounts_apart_and_hides_copies():
+    t0 = 1_790_000_000
+    rows = [{"account": "…638", "magic": "0", "closed": t0, "net": 100.0},
+            {"account": "…638", "magic": "0", "closed": t0 + 90_000, "net": -40.0},
+            {"account": "…303", "magic": "202520", "closed": t0, "net": 80.0}]
+    st = journal.stats(rows, {"202520": "Copier (copies)"})
+    assert {(s["account"], s["setup"]): s["net"] for s in st} == {("…638", "manual"): 60.0, ("…303", "Copier (copies)"): 80.0}
+    cv = journal.curves(rows[:2], 30)
+    assert [p["v"] for p in cv["…638"]["cum"]] == [100.0, 60.0] and len(cv["…638"]["periods"]) == 2
+    assert journal.curves(rows[:2], 365)["…638"]["period"] == "week"
+
+
+def test_journal_endpoint_hides_copier_trades(client):
+    db = client.app_state["ctx"].db
+    for pid, magic, net in (("1", "0", 50.0), ("2", "202520", 45.0)):
+        db.journal_upsert({"account": "A", "position_id": pid, "symbol": "DAX", "side": "LONG", "magic": magic,
+                           "opened": 1, "closed": __import__("time").time() - 3600, "net": net})
+    client.patch("/api/settings", json={"copy_magics": ["202520"]})
+    d = client.get("/api/journal?days=7").json()
+    assert [t["position_id"] for t in d["trades"]] == ["1"] and d["copies_hidden"] == 1
+    assert len(client.get("/api/journal?days=7&copies=true").json()["trades"]) == 2

@@ -70,14 +70,15 @@ def r_multiple(row: dict) -> float | None:
 
 
 def stats(rows: list[dict], names: dict) -> list[dict]:
-    per: dict[str, list] = defaultdict(list)
+    """Per account and setup: accounts can hold different currencies, so their money is never added up."""
+    per: dict[tuple, list] = defaultdict(list)
     for r in rows:
         if r.get("closed"):
-            per[str(r.get("magic") or "0")].append(r)
+            per[(r.get("account"), str(r.get("magic") or "0"))].append(r)
     out = []
-    for magic, trades in per.items():
+    for (account, magic), trades in per.items():
         rs = [x for x in (r_multiple(t) for t in trades) if x is not None]
-        out.append({"setup": "manual" if magic == "0" else names.get(magic, f"magic {magic}"), "magic": magic,
+        out.append({"account": account, "setup": "manual" if magic == "0" else names.get(magic, f"magic {magic}"), "magic": magic,
                     "trades": len(trades), "net": sum(t.get("net") or 0 for t in trades),
                     "with_risk": len(rs), "avg_r": statistics.mean(rs) if rs else None,
                     "se_r": statistics.stdev(rs) / len(rs) ** 0.5 if len(rs) > 2 else None,
@@ -85,14 +86,48 @@ def stats(rows: list[dict], names: dict) -> list[dict]:
     return sorted(out, key=lambda x: -x["trades"])
 
 
-async def view(ctx, days: int = 30) -> dict:
+def curves(closed: list[dict], days: int) -> dict:
+    """Per account: cumulative net after each closed trade, and net per day (per week beyond 90 days)."""
+    out: dict[str, dict] = {}
+    weekly = days > 90
+    for r in sorted(closed, key=lambda x: x.get("closed") or 0):
+        acc = out.setdefault(r.get("account") or "?", {"cum": [], "periods": defaultdict(float), "total": 0.0})
+        acc["total"] += r.get("net") or 0
+        acc["cum"].append({"t": r["closed"], "v": round(acc["total"], 2)})
+        d = time.localtime(r["closed"])
+        key = time.strftime("%G-W%V", d) if weekly else time.strftime("%Y-%m-%d", d)
+        acc["periods"][key] += r.get("net") or 0
+    return {a: {"cum": v["cum"], "periods": [{"label": k, "net": round(n, 2)} for k, n in sorted(v["periods"].items())],
+                "total": v["total"], "period": "week" if weekly else "day"} for a, v in out.items()}
+
+
+async def view(ctx, days: int = 30, include_copies: bool = False) -> dict:
     rows = await ctx.db.run(ctx.db.journal, time.time() - days * 86400, 1000)
     names = {str(k): v for k, v in (ctx.settings.get("magic_names") or {}).items()}
+    copies = {str(m) for m in (ctx.settings.get("copy_magics") or [])}
     for r in rows:
         r["setup"] = "manual" if str(r.get("magic") or "0") == "0" else names.get(str(r.get("magic")), f"magic {r.get('magic')}")
         r["r"] = r_multiple(r)
         r["risk_source"] = "confirmed" if r.get("risk_confirmed") else "observed" if r.get("risk_observed") else None
-    closed = [r for r in rows if r.get("closed")]
-    return {"trades": closed, "open": [r for r in rows if not r.get("closed")], "stats": stats(closed, names),
+        r["copy"] = str(r.get("magic") or "0") in copies
+    closed_all = [r for r in rows if r.get("closed")]
+    closed = closed_all if include_copies else [r for r in closed_all if not r["copy"]]
+    currency = {}
+    try:
+        from . import broker
+        currency = {a.get("login"): a.get("currency") for a in (await broker.overview(ctx)).get("accounts", [])}
+    except Exception:
+        pass
+    st = stats(closed, names)
+    for x in st:
+        x["currency"] = currency.get(x["account"])
+    cv = curves(closed, days)
+    for a, c in cv.items():
+        c["currency"] = currency.get(a)
+    hidden = len(closed_all) - len(closed)
+    return {"trades": closed, "open": [r for r in rows if not r.get("closed")], "stats": st, "curves": cv,
+            "copies_hidden": hidden, "copy_magics": sorted(copies),
             "note": "R needs an initial risk: 'observed' = money to the stop when SessionDesk first saw the position (a proxy), "
-                    "'confirmed' = entered by you. Averages with fewer than ~30 trades are anecdotal."}
+                    "'confirmed' = entered by you. Averages with fewer than ~30 trades are anecdotal. Accounts are never added "
+                    "together (they can hold different currencies)."
+                    + (f" {hidden} copied trades (copy_magics in Settings) are hidden so nothing counts twice." if hidden else "")}

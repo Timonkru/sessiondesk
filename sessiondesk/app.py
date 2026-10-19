@@ -492,9 +492,9 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return await ctx.cache.get("cal:history", 3 * 3600, build)
 
     @app.get("/api/journal")
-    async def get_journal(days: int = 30):
+    async def get_journal(days: int = 30, copies: bool = False):
         from .features import journal
-        return await journal.view(C(), min(days, 365))
+        return await journal.view(C(), min(days, 365), include_copies=copies)
 
     @app.post("/api/journal")
     async def set_journal(request: Request):

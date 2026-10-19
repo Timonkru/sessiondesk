@@ -74,6 +74,7 @@ DEFAULTS: dict = {
     "schedule": [],                     # your own times: {"label", "session", "offset_min"} or {"label", "session", "time", "tz"}
     "briefing_time": "",                # e.g. "08:40" = AI briefing every weekday at that local time (needs an AI key)
     "magic_names": {},                  # {"<EA magic number>": "readable setup name"} for Accounts & EAs
+    "copy_magics": [],                  # magic numbers of trade copiers: their trades are copies, hidden in the Journal
     "jobs_files": [],                   # extra job files, imported read-only
     "jobs_python": "",                  # interpreter for "python" jobs whose file names none (default: SessionDesk's own)
     "extensions_enabled": True,         # load your own pages from <data dir>/extensions/ (see sessiondesk/extensions.py)

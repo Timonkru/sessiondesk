@@ -2,6 +2,9 @@
 // serious charting stays in the user's charting platform.
 import { svg, h } from "./ui.js";
 
+// The SVG is stretched horizontally; a hyphen-minus then becomes invisible. Axis labels use the real minus sign.
+const axisText = (t) => String(t).replace(/^-/, "−");
+
 export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.toFixed(2), fmtX = (x) => x, xLabels = null, area = true } = {}) {
   const wrap = h("div", { class: "chart" });
   if (!points || points.length < 2) { wrap.appendChild(h("p", { class: "muted" }, "Not enough data for a chart.")); return wrap; }
@@ -20,7 +23,7 @@ export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.to
   for (let k = 0; k <= 4; k++) {
     const v = min + ((max - min) * k) / 4, y = Y(v);
     root.appendChild(svg("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "gridline" }));
-    root.appendChild(svg("text", { x: W - padR + 6, y: y + 4, class: "axis" }, fmtY(v)));
+    root.appendChild(svg("text", { x: W - padR + 6, y: y + 4, class: "axis" }, axisText(fmtY(v))));
   }
   // x labels
   const n = 5;
@@ -109,7 +112,7 @@ export function candleChart(rawBars, { height = 300, fmtY = (v) => v.toFixed(2),
   for (let k = 0; k <= 4; k++) {
     const v = min + ((max - min) * k) / 4, y = Y(v);
     root.appendChild(svg("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "gridline" }));
-    root.appendChild(svg("text", { x: W - padR + 6, y: y + 4, class: "axis" }, fmtY(v)));
+    root.appendChild(svg("text", { x: W - padR + 6, y: y + 4, class: "axis" }, axisText(fmtY(v))));
   }
   for (let k = 0; k < 5; k++) {
     const i = Math.round((k / 4) * (bars.length - 1));
