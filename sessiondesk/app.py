@@ -341,6 +341,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return {"items": res.get("data", []), "source": res.get("source"), "error_detail": res.get("error")}
         return await ctx.cache.get(f"earnings:{days}:{dt.date.today()}", 3 * 3600, build, disk=True)
 
+    @app.get("/api/timeline")
+    async def get_timeline(days: int = 7):
+        from .features import timeline
+        ctx = C()
+
+        async def build():
+            return await timeline.timeline(ctx, max(1, min(days, 21)))
+        return await ctx.cache.get(f"timeline:{days}", 60, build)
+
     @app.get("/api/flows")
     async def get_flows(days: int = 120):
         return await flows.flows(C(), min(days, 400))

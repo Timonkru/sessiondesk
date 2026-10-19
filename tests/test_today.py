@@ -94,3 +94,26 @@ def test_journal_endpoint_hides_copier_trades(client):
     d = client.get("/api/journal?days=7").json()
     assert [t["position_id"] for t in d["trades"]] == ["1"] and d["copies_hidden"] == 1
     assert len(client.get("/api/journal?days=7&copies=true").json()["trades"]) == 2
+
+
+def test_timeline_earnings_filter_and_endpoint(client):
+    from sessiondesk.features import timeline
+    rows = [{"symbol": "AAPL", "name": "Apple", "date": "2026-10-29", "timing": "after close", "market_cap": "$3,500,000,000,000"},
+            {"symbol": "TINY", "name": "Tiny Corp", "date": "2026-10-29", "market_cap": "$900,000,000"},
+            {"symbol": "MINE", "name": "Mine", "date": "2026-10-29", "market_cap": None}]
+    out = timeline.earnings_items(rows, {"MINE"}, {"AAPL"})
+    assert {(x["tag"], x["detail"].split(" · ")[-1]) for x in out} == {("AAPL", "index member"), ("MINE", "watchlist")}
+    import time as _t
+    soon = _t.time() + 7200
+
+    async def events(start, end):
+        return {"events": [{"ts": soon, "currency": "USD", "title": "CPI m/m", "impact": "high", "forecast": "0.3%"},
+                           {"ts": soon, "currency": "USD", "title": "Minor index", "impact": "low"}], "sources": ["stub"]}
+    client.app_state["ctx"].extras["calendar"].events = events
+    d = client.get("/api/timeline?days=7").json()
+    kinds = {x["kind"] for x in d["items"]}
+    assert {"release", "session", "flow"} <= kinds                   # stub release + default sessions + rule-based flows
+    assert [x["title"] for x in d["items"] if x["kind"] == "release"] == ["CPI m/m"]   # low impact left out
+    assert all(x["day"] for x in d["items"])
+    days = [x["day"] for x in d["items"]]
+    assert days == sorted(days)

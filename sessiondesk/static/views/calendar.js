@@ -1,20 +1,56 @@
-// Economic calendar (merged sources, live actuals) + earnings calendar.
+// Calendar: one timeline of everything scheduled (releases, earnings that matter, forced flows, your schedule),
+// plus the detailed economic calendar (live actuals, reaction history) and the full earnings list.
 import { api, on } from "../lib/api.js";
 import { h, clear, table, section, clock, day, countdown, note, loading, errorBox, num, pct, dir } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
-  let tab = "eco", level = localStorage.getItem("sd.calLevel") || "high", events = [];
+  let tab = localStorage.getItem("sd.calTab") || "time", level = localStorage.getItem("sd.calLevel") || "high", events = [];
+  const KINDS = [["release", "Releases"], ["earnings", "Earnings"], ["flow", "Forced flows"], ["setup", "My schedule"]];
+  const shown = new Set(JSON.parse(localStorage.getItem("sd.calKinds") || '["release","earnings","flow","setup"]'));
   const bar = h("div", { class: "tabs" }), body = h("div"), info = h("p", { class: "note" });
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Calendar")), bar, body);
-  const drawTabs = () => clear(bar, [["eco", "Economic"], ["earn", "Earnings"]].map(([k, l]) =>
-    h("button", { class: k === tab ? "on" : "", onclick: () => { tab = k; drawTabs(); draw(); } }, l)));
+  const drawTabs = () => clear(bar, [["time", "Timeline"], ["eco", "Economic"], ["earn", "Earnings"]].map(([k, l]) =>
+    h("button", { class: k === tab ? "on" : "", onclick: () => { tab = k; localStorage.setItem("sd.calTab", k); drawTabs(); draw(); } }, l)));
+
+  // ---------------------------------------------------------------- timeline
+  let tl = null;
+  const loadTimeline = async () => {
+    if (!tl) clear(body, loading());
+    tl = await api("/api/timeline?days=7", { fresh: true });
+    drawTimeline();
+  };
+  const drawTimeline = () => {
+    if (tab !== "time" || !tl) return;
+    if (tl.error) { clear(body, errorBox(tl.error)); return; }
+    const now = Date.now() / 1000;
+    const want = (x) => shown.has(x.kind === "session" ? "setup" : x.kind);
+    const items = (tl.items || []).filter(want);
+    const boxes = KINDS.map(([k, label]) => h("label", null, h("input", { type: "checkbox", checked: shown.has(k), onchange: (e) => {
+      if (e.target.checked) shown.add(k); else shown.delete(k);
+      localStorage.setItem("sd.calKinds", JSON.stringify([...shown])); drawTimeline(); } }), " " + label));
+    const byDay = new Map();
+    for (const x of items) { if (!byDay.has(x.day)) byDay.set(x.day, []); byDay.get(x.day).push(x); }
+    const KIND = { release: "● release", earnings: "◆ earnings", flow: "⇄ flow", setup: "· setup", session: "▸ session" };
+    clear(body, h("div", { class: "screenfilters" }, boxes),
+      ...[...byDay].map(([d, rows]) => section(new Date(d + "T12:00:00").toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }), table([
+        { label: "Time", render: (x) => (x.ts ? clock(x.ts) : h("span", { class: "muted small" }, "all day")) },
+        { label: "In", render: (x) => (!x.ts ? "" : x.ts > now ? (x.ts - now < 86400 ? countdown(x.ts - now) : "") : h("span", { class: "muted" }, "done")) },
+        { label: "", render: (x) => h("span", { class: "small " + (x.kind === "release" ? (x.level === "high" ? "warn" : "") : x.kind === "setup" ? "muted" : "") }, KIND[x.kind] || x.kind) },
+        { label: "", render: (x) => h("span", { class: "small" }, x.tag || "") },
+        { label: "What", render: (x) => (x.link ? h("a", { href: x.link }, x.title) : h("span", { style: { fontWeight: x.kind === "release" && x.level === "high" ? 600 : 400 } }, x.title)) },
+        { label: "", render: (x) => h("span", { class: "muted small" }, x.detail || "") },
+      ], rows, { rowClass: (x) => (x.ts && x.ts > now && x.ts - now < 1800 ? "hl" : "") }))),
+      items.length ? null : note("Nothing in the selected kinds for the next 7 days."),
+      note(tl.note + (Object.keys(tl.errors || {}).length ? " · Errors: " + Object.entries(tl.errors).map(([k, v]) => `${k}: ${v}`).join("; ") : "")));
+    ctx.setContext({ page: "Calendar timeline", items: items.slice(0, 150).map((x) => ({ day: x.day, time: x.ts ? new Date(x.ts * 1000).toISOString() : "all day", kind: x.kind, tag: x.tag, title: x.title, detail: x.detail })) });
+  };
 
   const levelSel = h("select", { onchange: (e) => { level = e.target.value; localStorage.setItem("sd.calLevel", level); drawEco(); } },
     [["high", "High impact"], ["medium", "High + medium"], ["all", "All"]].map(([v, l]) => h("option", { value: v, selected: v === level }, l)));
 
   const loadEco = async () => {
     const d = await api("/api/calendar?days=10&back_hours=36", { fresh: true });
-    if (d.error) { clear(body, errorBox(d.error)); return; }
+    if (d.error) { if (tab === "eco") clear(body, errorBox(d.error)); return; }
     events = d.events || [];
     const actualSources = (d.sources || []).filter((s) => s !== "ffcal");
     info.textContent = `Sources: ${(d.sources || []).join(", ") || "none"}.` +
@@ -80,13 +116,15 @@ export async function render(root, _params, ctx) {
       ], big, { empty: d.error_detail || "No earnings data." }));
     ctx.setContext({ page: "Earnings calendar", earnings: big.slice(0, 120) });
   };
-  const draw = () => (tab === "eco" ? (events.length ? drawEco() : loadEco()) : loadEarn());
+  const draw = () => (tab === "time" ? (tl ? drawTimeline() : loadTimeline()) : tab === "eco" ? (events.length ? drawEco() : loadEco()) : loadEarn());
 
   drawTabs();
   clear(body, loading());
-  await loadEco();
+  if (tab === "time") await loadTimeline(); else if (tab === "eco") await loadEco(); else await loadEarn();
+  if (tab !== "eco") loadEco();
   loadHistory();
-  const off = on("release", loadEco);
-  const t1 = setInterval(() => tab === "eco" && drawEco(), 1000 * 15), t2 = setInterval(() => tab === "eco" && loadEco(), 60000);
+  const off = on("release", () => { loadEco(); if (tab === "time") loadTimeline(); });
+  const t1 = setInterval(() => (tab === "eco" ? drawEco() : tab === "time" ? drawTimeline() : null), 1000 * 15),
+    t2 = setInterval(() => (tab === "eco" ? loadEco() : tab === "time" ? loadTimeline() : null), 60000);
   return () => { off(); clearInterval(t1); clearInterval(t2); };
 }
