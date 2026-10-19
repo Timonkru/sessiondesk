@@ -138,12 +138,12 @@ document.addEventListener("keydown", (e) => {
 
 // ------------------------------------------------------------------ AI drawer
 const aiLog = $("aiLog"), aiInput = $("aiInput");
-let history = [], aiAbort = null;
+let chatHistory = [], aiAbort = null;          // not "history": that would hide window.history (the Back button)
 
 function openAI() { $("ai").hidden = false; setTimeout(() => aiInput.focus(), 0); }
 $("aiToggle").addEventListener("click", () => { $("ai").hidden ? openAI() : ($("ai").hidden = true); });
 $("aiClose").addEventListener("click", () => { $("ai").hidden = true; });
-$("aiClear").addEventListener("click", () => { history = []; clear(aiLog); if (aiAbort) aiAbort.abort(); });
+$("aiClear").addEventListener("click", () => { chatHistory = []; clear(aiLog); if (aiAbort) aiAbort.abort(); });
 $("aiForm").addEventListener("submit", (e) => { e.preventDefault(); const q = aiInput.value.trim(); if (q) { aiInput.value = ""; sendAI(q); } });
 aiInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("aiForm").requestSubmit(); } });
 
@@ -159,7 +159,7 @@ async function sendAI(question, mode = "ask") {
   let text = "";
   const isSupport = mode === "support" || (pageContext.page || "").startsWith("Help");
   try {
-    await streamChat({ mode: isSupport ? "support" : mode, question, context: pageContext, history }, (ev) => {
+    await streamChat({ mode: isSupport ? "support" : mode, question, context: pageContext, history: chatHistory }, (ev) => {
       if (ev.type === "meta") who.textContent = `AI · ${ev.provider} · ${ev.model}`;
       else if (ev.type === "text") { text += ev.text; clear(body, markdown(text)); aiLog.scrollTop = aiLog.scrollHeight; }
       else if (ev.type === "error") {
@@ -173,7 +173,7 @@ async function sendAI(question, mode = "ask") {
   } catch (err) {
     if (err.name !== "AbortError") clear(body, h("p", { class: "error" }, String(err)));
   }
-  if (text) { history.push({ role: "user", content: question }, { role: "assistant", content: text }); history = history.slice(-8); }
+  if (text) { chatHistory.push({ role: "user", content: question }, { role: "assistant", content: text }); chatHistory = chatHistory.slice(-8); }
 }
 export { sendAI };
 
@@ -302,7 +302,7 @@ setInterval(pollSystem, 120000);
 // Back: the app window (--app) has no browser bar, so the desk brings its own. Only shown once there is a page to go back to.
 let depth = 0;
 window.addEventListener("hashchange", () => { depth += 1; $("back").hidden = depth < 1; });
-$("back").addEventListener("click", () => { depth = Math.max(0, depth - 2); history.back(); });
+$("back").addEventListener("click", () => { depth = Math.max(0, depth - 2); window.history.back(); });
 
 window.addEventListener("hashchange", route);
 connect((live) => { const c = $("conn"); c.textContent = live ? "live" : "offline"; c.className = live ? "live" : "off"; });
