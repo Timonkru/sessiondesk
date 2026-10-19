@@ -1,6 +1,6 @@
 // Accounts & EAs - read-only view of connected trading accounts, positions, running Expert Advisors.
 import { api } from "../lib/api.js";
-import { h, clear, table, section, price, num, big, dir, ago, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, table, section, price, num, pct, big, dir, ago, note, loading, errorBox } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
   const body = h("div", null, loading());
@@ -37,11 +37,11 @@ export async function render(root, _params, ctx) {
       section("Running Expert Advisors", table([
         { label: "Account", render: (e) => e.account }, { label: "Chart", render: (e) => `${e.symbol} ${e.timeframe}` }, { label: "Expert", render: (e) => e.expert },
       ], d.eas, { empty: "No EA attached to any chart (or bridge without EA export)." })),
-      bookBox, fxBox,
+      vpsBox, bookBox, fxBox,
       section("Closed trades by EA - 7 days", perf(d.performance_7d)), section("Closed trades by EA - 30 days", perf(d.performance_30d)),
       specsBox,
       note("Trades are grouped by the magic number of the opening deal, so a manual close of an EA trade still counts for the EA. Net = profit + commission + swap."));
-    ctx.setContext({ page: "Accounts & EAs", accounts: d.accounts, positions: d.positions, eas: d.eas, performance_7d: d.performance_7d, performance_30d: d.performance_30d });
+    ctx.setContext({ page: "Accounts & EAs", accounts: d.accounts, positions: d.positions, eas: d.eas, vps: vpsFacts, performance_7d: d.performance_7d, performance_30d: d.performance_30d });
   };
   // Extra status values an exporter provides (e.g. risk multiplier, day-start balance) - shown as delivered.
   const extrasTable = (accounts) => {
@@ -53,7 +53,31 @@ export async function render(root, _params, ctx) {
       ...accounts.map((a) => ({ label: a.login, num: true, render: (k) => fmt((a.extra || {})[k]) })),
     ], keys));
   };
-  const bookBox = h("div"), fxBox = h("div"), specsBox = h("div");
+  const bookBox = h("div"), fxBox = h("div"), specsBox = h("div"), vpsBox = h("div");
+  const loadVps = async () => {
+    const v = await api("/api/broker/vps", { fresh: true });
+    const hs = v.hostings || [];
+    if (!hs.length) { clear(vpsBox); return; }
+    clear(vpsBox, hs.map((x) => {
+      const hb = x.heartbeat || {};
+      const stale = x.synced_ago > 6 * 3600;
+      return section(`MQL5 VPS ${x.id}` + (hb.account ? ` · account …${String(hb.account).slice(-3)}` : ""),
+        h("p", { class: "small" }, hb.time ? `Last heartbeat ${hb.time} (${x.timezone || "VPS clock"}): ${hb.charts} charts, ${hb.eas} EAs` : "No heartbeat in the synced logs.",
+          " · ", h("span", { class: stale ? "warn" : "muted" }, `logs synced ${ago(Date.now() / 1000 - x.synced_ago)} ago`),
+          x.drops ? h("span", { class: "muted" }, ` · ${x.drops} connection drops, ${x.restarts} restarts in the last days`) : null),
+        table([{ label: "Expert", render: (e) => e.ea }, { label: "Chart", render: (e) => `${e.symbol} ${e.timeframe}` },
+          { label: "Loaded", render: (e) => h("span", { class: "small muted" }, e.loaded || "–") },
+          { label: "Last journal line", render: (e) => h("span", { class: "small", title: e.last_message || "" }, e.last_time ? `${e.last_time.slice(5, 16)}  ${(e.last_message || "").slice(0, 110)}` : "–") }],
+          x.eas, { empty: "No EA seen in the synced journals." }),
+        (x.warnings || []).length ? h("details", null, h("summary", { class: "small warn" }, `${x.warnings.length} warnings / errors in the journals`),
+          h("ul", { class: "feed" }, x.warnings.map((w) => h("li", null, h("div", { class: "t small" }, w.text), h("div", { class: "m" }, `${w.time} · ${w.source}`))))) : null,
+        (x.deals || []).length ? h("details", null, h("summary", { class: "small" }, `last ${x.deals.length} deals on the VPS account`),
+          table([{ label: "Time", render: (d) => d.time.slice(5) }, { label: "Deal", render: (d) => `${d.side} ${d.volume} ${d.symbol}` }, { label: "Price", num: true, render: (d) => price(d.price) }], x.deals)) : null,
+        note(v.note + (stale ? " The logs are older than 6 h: open the VPS tab in your local terminal (or keep it running) to sync them." : "")));
+    }));
+    vpsFacts = hs;
+  };
+  let vpsFacts = [];
   const loadExtras = async () => {
     const [bk, fx, sp] = await Promise.all([api("/api/book", { ttl: 30000 }), api("/api/fx/strength", { ttl: 30000 }), api("/api/specs", { ttl: 60000 })]);
     const m = bk.matrix || [];
@@ -83,7 +107,8 @@ export async function render(root, _params, ctx) {
   ], rows || [], { empty: "No closed trades in this window." });
   await load();
   loadExtras();
-  const t2 = setInterval(loadExtras, 60000);
+  loadVps();
+  const t2 = setInterval(() => { loadExtras(); loadVps(); }, 60000);
   const t = setInterval(load, 5000);
   return () => { clearInterval(t); clearInterval(t2); };
 }

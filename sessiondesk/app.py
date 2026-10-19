@@ -447,6 +447,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def get_broker():
         return await broker_view.overview(C())
 
+    @app.get("/api/broker/vps")
+    async def get_vps():
+        from .features import vps
+        ctx = C()
+
+        async def build():
+            return await asyncio.to_thread(vps.status, ctx.settings)
+        return await ctx.cache.get("vps", 60, build)
+
     @app.get("/api/book")
     async def get_book():
         ctx = C()
