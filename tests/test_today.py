@@ -35,7 +35,7 @@ def test_collisions_with_high_impact_releases():
 def test_prop_meter_with_exporter_day_start():
     acc = {"login": "…002", "equity": 98500.0, "currency": "USD",
            "extra": {"day_start_balance": "100000", "risk_multiplier": "0.5", "all_time_high": "101000"}}
-    rule = today.rules_for("…002", {"*": {"own_stop_pct": 1.5, "risk_per_trade_pct": 0.25}, "303": {"daily_loss_pct": 5, "max_loss_pct": 10,
+    rule = today.rules_for("…002", {"*": {"own_stop_pct": 1.5, "risk_per_trade_pct": 0.25}, "002": {"daily_loss_pct": 5, "max_loss_pct": 10,
                                                                                                     "initial_balance": 100000}})
     m = today.prop_meter(acc, rule, None)
     assert m["day_pct"] == pytest.approx(-1.5) and m["own_stop_room_pct"] == pytest.approx(0.0)
