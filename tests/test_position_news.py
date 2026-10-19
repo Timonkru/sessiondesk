@@ -51,3 +51,17 @@ def test_link_only_posts_are_dropped():
     assert not news.is_junk("French PM: state of emergency possible https://t.co/x")
     kept = news.prepare([{"id": "1", "title": "https://t.co/abc"}, {"id": "2", "title": "ECB hikes by 25 bp"}], "squawk")
     assert [k["id"] for k in kept] == ["2"]
+
+
+def test_market_wire_for_instrument_pages(tmp_path):
+    from sessiondesk.features import assets, stocks
+    assert assets.asset_of_yahoo("^GDAXI") == "DAX" and assets.asset_of_yahoo("EURUSD=X") == "EURUSD"
+    assert assets.asset_of_yahoo("GC=F") == "GOLD" and assets.asset_of_yahoo("AAPL") is None
+    ctx = SimpleNamespace(db=DB(tmp_path / "t.db"))
+    now = time.time()
+    ctx.db.add_news(news.prepare([{"id": "a", "title": "Lagarde: ECB stays data dependent", "source": "wire", "published": now},
+                                  {"id": "b", "title": "Copper demand in Chile rises", "source": "wire", "published": now},
+                                  {"id": "c", "title": "Bundesbank sees German economy stagnating", "source": "wire", "published": now - 72 * 3600}], "squawk"))
+    out = asyncio.run(stocks.market_wire(ctx, "^GDAXI"))
+    assert [w["id"] for w in out["wire"]] == ["a"] and out["wire_market"] == "DAX"   # c is older than 48 h
+    assert asyncio.run(stocks.market_wire(ctx, "AAPL")) == {"wire": [], "wire_themes": []}

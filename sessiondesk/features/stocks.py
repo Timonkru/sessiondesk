@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from . import universe
+from . import assets, universe
 from .valuation import profile
 
 PROFILE_FIELDS = ("name", "sector", "industry", "country", "website", "employees", "summary", "exchange", "currency",
@@ -56,12 +56,19 @@ async def summary(ctx, symbol: str, profile_wait: float = 1.5) -> dict:
     info = {} if "error" in prof else {k: prof.get(k) for k in PROFILE_FIELDS if prof.get(k) is not None}
     if not info.get("name") and "error" not in day:
         info["name"] = day.get("name")
+    if symbol.upper() in INDEX_NAMES:                       # vendor names like "DAX P" (performance index) read badly
+        info["name"] = INDEX_NAMES[symbol.upper()]
     member = universe.lookup(symbol)
     kind = (info.get("type") or ("" if "error" in day else day.get("type")) or "").upper()
     return {"symbol": symbol, "type": kind, "quote": quote, "profile": info, "index": universe.UNIVERSES.get(member["universe"]) if member else None,
             "sector_etf": universe.sector_etf(symbol, info.get("sector")), "peers": universe.peers(symbol, 8),
             "profile_error": None if prof.get("pending") else prof.get("error"), "profile_pending": bool(prof.get("pending")),
             "asof": time.time()}
+
+
+INDEX_NAMES = {"^GDAXI": "DAX 40", "^GSPC": "S&P 500", "^NDX": "Nasdaq-100", "^IXIC": "Nasdaq Composite", "^DJI": "Dow Jones 30",
+               "^RUT": "Russell 2000", "^FTSE": "FTSE 100", "^FCHI": "CAC 40", "^STOXX50E": "Euro Stoxx 50", "^SSMI": "SMI",
+               "^N225": "Nikkei 225", "^HSI": "Hang Seng", "^AXJO": "S&P/ASX 200", "^VIX": "VIX"}
 
 
 async def news(ctx, symbol: str) -> dict:
@@ -88,7 +95,23 @@ async def news(ctx, symbol: str) -> dict:
                     merged.append(it)
         merged.sort(key=lambda x: -x.get("published", 0))
         return {"items": merged[:80], "errors": errors, "sources": [s for s in results if s not in errors]}
-    return await ctx.cache.get(f"snews:{symbol}", 180, build)
+    out = dict(await ctx.cache.get(f"snews:{symbol}", 180, build))
+    out.update(await market_wire(ctx, symbol))
+    return out
+
+
+async def market_wire(ctx, symbol: str, hours: int = 48, limit: int = 60) -> dict:
+    """For an index, future, FX pair or commodity: headlines from your own live feeds (squawk, wires, central banks)
+    that touch this market's themes - the same matching as for open positions. Not cached: the archive is local."""
+    asset = assets.asset_of_yahoo(symbol)
+    if not asset or not ctx.db:
+        return {"wire": [], "wire_themes": []}
+    from .news import is_junk, match_held
+    themes = assets.themes_for_asset(asset)
+    rows = await ctx.db.run(ctx.db.query_news, None, None, None, None, 1500, int(time.time() - hours * 3600))
+    held = {asset: themes}
+    wire = [r for r in rows if not is_junk(r.get("title")) and match_held(r, held)][:limit]
+    return {"wire": wire, "wire_themes": sorted(themes - {"risk"}), "wire_market": asset, "wire_hours": hours}
 
 
 async def filings(ctx, symbol: str) -> dict:

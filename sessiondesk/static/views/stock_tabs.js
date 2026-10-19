@@ -18,6 +18,14 @@ function fail(d) { return errorBox(d && d.error ? d.error : "no data"); }
 async function overview(c) {
   const s = c.state.summary || {}, p = s.profile || {}, q = s.quote || {};
   const glance = h("div", null, loading("Collecting the key facts…"));
+  const wireBox = h("div", null, loading("Looking for headlines…"));
+  api(`/api/stock/${c.enc}/news`, { ttl: 60000 }).then((d) => {
+    const items = [...(d.wire || []), ...(d.items || [])].sort((x, y) => (y.published || 0) - (x.published || 0)).slice(0, 5);
+    c.state.blocks.headlines_latest = items.map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact }));
+    clear(wireBox, items.length ? headlineList(items) : note("No recent headlines for this instrument."),
+      h("p", { class: "small" }, h("a", { href: `#/stock/${c.enc}/news` , onclick: (e) => { e.preventDefault(); c.open && c.open("news"); } }, "all headlines →")));
+    c.pushContext();
+  });
   const earn = p.earnings_ts || p.earnings_start;
   const root = grid(
     h("div", null,
@@ -32,7 +40,7 @@ async function overview(c) {
         ["Next earnings", earn ? stamp(earn) : "–"], ["Employees", p.employees ? big(p.employees) : "–"],
       ].filter(([, v]) => isEquity(c) || v !== "–"))),
       s.profile_pending ? note("Fundamentals are still loading…", "loading") : null),
-    h("div", null, section("At a glance", glance), p.summary ? section("About", h("p", { class: "small", style: { color: "var(--fg2)" } }, p.summary),
+    h("div", null, section("At a glance", glance), section("Latest headlines", wireBox), p.summary ? section("About", h("p", { class: "small", style: { color: "var(--fg2)" } }, p.summary),
       p.website ? ext(p.website, p.website.replace(/^https?:\/\//, "")) : null) : null));
   // Facts from the other blocks, loaded in parallel.
   (async () => {
@@ -339,13 +347,21 @@ async function dividends(c) {
     note("The current calendar year is incomplete until its last payment."));
 }
 
-async function news(c) {
-  const d = await api(`/api/stock/${c.enc}/news`, { ttl: 120000 });
-  c.state.blocks.headlines = (d.items || []).slice(0, 20).map((n) => ({ title: n.title, source: n.source, published: n.published }));
-  return h("div", null, h("ul", { class: "feed" }, (d.items || []).slice(0, 60).map((n) => h("li", null,
+function headlineList(items) {
+  return h("ul", { class: "feed" }, items.map((n) => h("li", { class: n.impact === "high" ? "high" : "" },
     h("div", { class: "t" }, n.url ? h("a", { href: n.url, target: "_blank", rel: "noopener noreferrer", style: { color: "inherit" } }, n.title) : n.title),
-    h("div", { class: "m" }, `${ago(n.published)} ago · ${n.source}` + (n.sentiment ? ` · ${n.sentiment}` : ""), "  ",
-      n.url ? h("a", { href: "#/research/read/" + encodeURIComponent(n.url) }, "read here") : null)))),
+    h("div", { class: "m" }, `${ago(n.published)} ago · ${n.source}` + (n.impact && n.impact !== "normal" ? ` · ${n.impact}` : "") + (n.sentiment ? ` · ${n.sentiment}` : ""), "  ",
+      n.url ? h("a", { href: "#/research/read/" + encodeURIComponent(n.url) }, "read here") : null))));
+}
+
+async function news(c) {
+  const d = await api(`/api/stock/${c.enc}/news`, { ttl: 60000 });
+  c.state.blocks.headlines = (d.items || []).slice(0, 20).map((n) => ({ title: n.title, source: n.source, published: n.published }));
+  c.state.blocks.live_wire = (d.wire || []).slice(0, 25).map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact }));
+  const wire = d.wire_market ? section(`From your live feeds · ${d.wire_market}, last ${d.wire_hours} h`,
+    (d.wire || []).length ? headlineList(d.wire) : note("Nothing in your feeds touched this market."),
+    note(`Matched by market themes (${(d.wire_themes || []).join(", ")}): squawk, wires and central banks you receive, newest first. A match means the topic is relevant, not that it moved the price.`)) : null;
+  return h("div", null, wire, section(d.wire_market ? "Ticker news" : null, headlineList((d.items || []).slice(0, 60))),
     (d.items || []).length ? null : note("No headlines from the active news sources."),
     note("Sources: " + ((d.sources || []).join(", ") || "none") + (d.errors && Object.keys(d.errors).length ? " · failed: " + Object.keys(d.errors).join(", ") : "")));
 }

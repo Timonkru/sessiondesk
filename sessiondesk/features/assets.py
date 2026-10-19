@@ -41,6 +41,24 @@ def asset_of(symbol: str, settings=None) -> str | None:
     return None
 
 
+YAHOO_ALIASES = {"^GSPC": "SPX", "ES=F": "SPX", "^NDX": "NQ", "^IXIC": "NQ", "NQ=F": "NQ", "^DJI": "DOW", "YM=F": "DOW",
+                 "^RUT": "RUSSELL", "RTY=F": "RUSSELL", "^N225": "NIKKEI", "NKD=F": "NIKKEI", "BZ=F": "OIL", "CL=F": "OIL",
+                 "^GDAXI": "DAX", "FDAX=F": "DAX", "^FTSE": "FTSE", "^FCHI": "CAC", "^STOXX50E": "STOXX", "^SSMI": "SMI",
+                 "^HSI": "HK50", "^AXJO": "AUS200", "GC=F": "GOLD", "SI=F": "SILVER", "BTC-USD": "BTC", "ETH-USD": "ETH"}
+
+
+def asset_of_yahoo(symbol: str) -> str | None:
+    """'^GDAXI' -> 'DAX', 'EURUSD=X' -> 'EURUSD', 'GC=F' -> 'GOLD'; single stocks -> None."""
+    s = (symbol or "").upper()
+    if s in YAHOO_ALIASES:
+        return YAHOO_ALIASES[s]
+    if s.endswith("=X"):
+        core = s[:-2]
+        if len(core) == 6 and core[:3] in FX and core[3:] in FX:
+            return core
+    return None
+
+
 def yahoo_ticker(asset: str | None) -> str | None:
     if not asset:
         return None

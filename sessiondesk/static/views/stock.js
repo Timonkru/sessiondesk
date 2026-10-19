@@ -34,7 +34,7 @@ export async function render(root, params, ctx) {
     if (!d.error) state.blocks[name] = d;
     return d;
   };
-  const tabCtx = { symbol, enc, state, block, ask: ctx.ask, go: ctx.go, pushContext };
+  const tabCtx = { symbol, enc, state, block, ask: ctx.ask, go: ctx.go, pushContext, open: (k) => openTab(k) };
 
   // ---------------------------------------------------------------- header + key strip
   const loadSummary = async () => {
