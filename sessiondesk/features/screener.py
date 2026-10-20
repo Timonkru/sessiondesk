@@ -80,6 +80,7 @@ async def screen(ctx, key: str) -> dict:
             prof = {}
         pe = _num(prof.get("pe_forward"))
         rows.append({"symbol": sym, "name": m.get("name") or prof.get("name") or "", "sector": m.get("sector") or prof.get("sector") or "",
+                     "industry": m.get("industry") or "",
                      **met, "market_cap": _num(prof.get("market_cap")), "pe_fwd": pe if pe is not None and 0 < pe < 400 else None,
                      "div_yield": (_num(prof.get("dividend_yield")) or 0) * 100 if prof.get("dividend_yield") is not None else None})
     return {"key": key, "name": universe.UNIVERSES[key], "rows": rows, "asof": time.time(), "with_profile": with_profile,

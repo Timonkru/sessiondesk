@@ -1,19 +1,51 @@
-// Indices & breadth: participation (breadth, new highs/lows, breadth line vs index), who moves the index,
-// bottom-up valuation with its own history, and the FactSet anchor for the S&P 500.
 import { api } from "../lib/api.js";
 import { lineChart } from "../lib/chart.js";
 import { h, clear, table, section, num, pct, price, signed, dir, note, loading, errorBox, ago } from "../lib/ui.js";
+import { stockTable, crumbs } from "../lib/stocktable.js";
+
+// Indices: every index by region; an index with a bundled member list opens to its members (the shared stock
+// table) and to breadth, drivers and valuation computed from those members.
+const REGION_ORDER = ["Americas", "Europe", "Asia-Pacific", "Middle East & Africa"];
 
 export async function render(root, params, ctx) {
-  const INDICES = ((await api("/api/universes", { ttl: 600000 })).items || []).map((u) => [u.key, u.name]);
-  const key = INDICES.some(([k]) => k === params[0]) ? params[0] : "sp500";
-  const tabBar = h("div", { class: "tabs" }, INDICES.map(([k, label]) =>
-    h("button", { class: k === key ? "on" : "", onclick: () => ctx.go("#/indices/" + k) }, label)));
-  const body = h("div", null, loading("Loading member history… (first load of an index takes up to a minute)"));
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Indices & breadth"),
-    h("span", { class: "meta" }, "participation, contributions and valuation from member data")), tabBar,
-    h("p", { class: "small muted" }, `Breadth, drivers and valuation need the list of members; it is bundled for these ${INDICES.length} indices. The other indices on Markets have price, chart, performance and options on their own page.`), body);
+  const uni = (await api("/api/universes", { ttl: 600000 })).items || [];
+  const byKey = Object.fromEntries(uni.map((u) => [u.key, u]));
+  if (params[0] && byKey[params[0]]) return indexPage(root, byKey[params[0]], params[1] || "members", ctx);
+  return landing(root, uni, ctx);
+}
 
+async function landing(root, uni, ctx) {
+  const bySym = Object.fromEntries(uni.map((u) => [u.symbol, u]));
+  const body = h("div", null, loading());
+  root.append(crumbs([["Markets", "#/markets"], ["Indices"]]),
+    h("div", { class: "pagehead" }, h("h1", null, "Indices"), h("span", { class: "meta" }, "by region - open one for its members, breadth and drivers")), body);
+  const d = await api("/api/overview", { ttl: 30000 });
+  if (d.error) { clear(body, errorBox(d.error)); return; }
+  const groups = (d.groups || []).filter((g) => REGION_ORDER.includes(g.title));
+  clear(body, h("div", { class: "cols" }, groups.map((g) => section(g.title, table([
+    { label: "Index", render: (r) => h("a", { href: bySym[r.symbol] ? "#/indices/" + bySym[r.symbol].key : "#/stock/" + encodeURIComponent(r.symbol) }, r.label) },
+    { label: "Last", num: true, render: (r) => price(r.price) },
+    { label: "Today", num: true, cls: (r) => dir(r.change_pct), render: (r) => pct(r.change_pct) },
+    { label: "", render: (r) => (bySym[r.symbol] ? h("span", { class: "small" }, `${bySym[r.symbol].members} members ›`) : h("span", { class: "small muted" }, "price & chart")) },
+  ], g.rows, { onRow: (r) => ctx.go(bySym[r.symbol] ? "#/indices/" + bySym[r.symbol].key : "#/stock/" + encodeURIComponent(r.symbol)) })))),
+  note(`Members, breadth, drivers and valuation need the list of an index's members; it is bundled for ${uni.length} indices (marked "members ›"). The others open their instrument page with price, chart, performance and options.`));
+  ctx.setContext({ page: "Indices", regions: groups.map((g) => ({ region: g.title, indices: g.rows.map((r) => ({ name: r.label, change_pct: r.change_pct })) })) });
+}
+
+async function indexPage(root, u, tab, ctx) {
+  const region = ["sp500", "nasdaq100", "dow30"].includes(u.key) ? "Americas" : "Europe";
+  const TABS = [["members", "Members"], ["breadth", "Breadth, drivers & valuation"]];
+  const body = h("div", null, loading("Loading member history… (first load of an index takes up to a minute)"));
+  root.append(crumbs([["Markets", "#/markets"], ["Indices", "#/indices"], [region, "#/indices"], [u.name]]),
+    h("div", { class: "pagehead" }, h("h1", null, u.name), h("span", { class: "meta" }, `${u.members} members · `, h("a", { href: "#/stock/" + encodeURIComponent(u.symbol) }, "index chart"))),
+    h("div", { class: "tabs" }, TABS.map(([k, label]) => h("button", { class: k === tab ? "on" : "", onclick: () => ctx.go(`#/indices/${u.key}/${k}`) }, label))), body);
+  if (tab === "breadth") return breadthTab(body, u.key, ctx);
+  const d = await api(`/api/stocks?scope=${encodeURIComponent("index:" + u.key)}`, { ttl: 60000 });
+  if (d.error) { clear(body, errorBox(d.error)); return; }
+  clear(body, stockTable(d.rows, { ctx, name: `${u.name} members`, group: "group", showIndices: false }), note(d.note));
+}
+
+async function breadthTab(body, key, ctx) {
   const d = await api("/api/indices/" + key, { ttl: 60000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
   const b = d.breadth || {};
@@ -121,7 +153,7 @@ export async function render(root, params, ctx) {
     note(`${d.note} Updated ${ago(d.asof)} ago. Breadth describes participation; on its own it has not been a reliable timing signal.`));
 
   ctx.setContext({
-    page: `Indices & breadth - ${d.name}`, index: d.name, index_move_pct: d.index_move_pct, index_points: d.index_points,
+    page: `Index ${d.name} - breadth, drivers, valuation`, index: d.name, index_move_pct: d.index_move_pct, index_points: d.index_points,
     breadth: { ...b, line: undefined, index_line: undefined, breadth_line_last5: line.slice(-5) },
     drivers_by_period: Object.fromEntries(Object.entries(d.drivers_by_period || {}).map(([k, x]) => [k, { index_move_pct: x.index_move_pct, index_points: x.index_points,
       up: (x.drivers_up || []).slice(0, 6).map((r) => ({ symbol: r.symbol, pct: r.pct, points: r.points, contrib_pct: r.contrib_pct })),

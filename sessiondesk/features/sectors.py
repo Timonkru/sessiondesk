@@ -88,7 +88,6 @@ SECTOR_OF_ETF = {
     "EXV9.DE": "discretionary", "EXH6.DE": "communication", "EXV2.DE": "communication", "EXH9.DE": "utilities",
     "EXI5.DE": "real_estate",
 }
-REGION_UNIVERSES = {"us": ["sp500"], "eu": ["stoxx50", "dax40", "cac40", "ftse100", "smi"]}
 
 
 def canonical_sector(sector: str | None, industry: str | None = None) -> str | None:
@@ -104,39 +103,18 @@ def canonical_sector(sector: str | None, industry: str | None = None) -> str | N
 
 
 async def drilldown(ctx, region: str, etf: str) -> dict:
-    """Members of one sector with their moves, from the same cached member closes the screener and indices use."""
-    from . import universe
-    from .indices import member_closes
-    from .screener import metrics
+    """The stocks of one sector, from the same stock list as every other level of the Markets tree."""
+    from .stocklist import stocks
     spec = REGIONS.get(region)
     target = SECTOR_OF_ETF.get(etf)
     if not spec or not target or etf not in [s for s, _ in spec["sectors"]]:
         return {"error": "unknown sector"}
-    rows: dict[str, dict] = {}
-    for key in REGION_UNIVERSES[region]:
-        data = await member_closes(ctx, key)
-        if "error" in data:
-            continue
-        for m in universe.members(key):
-            if canonical_sector(m.get("sector"), m.get("industry")) != target:
-                continue
-            if m["symbol"] in rows:
-                rows[m["symbol"]]["indices"].append(universe.UNIVERSES[key])
-                continue
-            met = metrics(data["closes"].get(m["symbol"]) or [])
-            if not met:
-                continue
-            prof = ctx.cache.peek(f"profile:v2:{m['symbol']}", disk=True) or {}
-            rows[m["symbol"]] = {"symbol": m["symbol"], "name": m.get("name") or "", "sub": m.get("industry") or m.get("sector") or "",
-                                 "indices": [universe.UNIVERSES[key]], **met,
-                                 "market_cap": prof.get("market_cap") if "error" not in prof else None}
-    out = sorted(rows.values(), key=lambda r: -(r.get("chg1d") or -1e9))
+    d = await stocks(ctx, f"region:{region}", group=target)
     perf = await performance(ctx, region)
     etf_row = next((r for r in perf.get("rows", []) if r["symbol"] == etf), None)
-    ups = [r for r in out if (r.get("chg1d") or 0) > 0]
     return {"region": region, "etf": etf, "sector": etf_row["name"] if etf_row else etf, "group": target, "etf_row": etf_row,
-            "benchmark": perf.get("benchmark"), "rows": out, "n": len(out), "up_share_1d": len(ups) / len(out) if out else None,
-            "note": ("Members of the S&P 500 in this GICS sector. " if region == "us" else
+            "benchmark": perf.get("benchmark"), "rows": d["rows"], "n": d["n"],
+            "note": ("Members of the S&P 500, Nasdaq-100 and Dow 30 in this sector. " if region == "us" else
                      "Members of Euro Stoxx 50, DAX, CAC 40, FTSE 100 and SMI, grouped into eleven broad sectors - the STOXX "
                      "sector ETFs are finer (e.g. Banks, Insurance and Financial services all show the financials here). ")
                     + "Moves from one year of daily closes, today's value live."}

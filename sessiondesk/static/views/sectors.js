@@ -2,64 +2,58 @@
 // A tile opens the sector: its ETF against the market, breadth, top and bottom movers, and every member stock.
 import { api } from "../lib/api.js";
 import { h, clear, table, section, num, pct, dir, big, price, sparkline, note, loading, errorBox } from "../lib/ui.js";
+import { stockTable, crumbs } from "../lib/stocktable.js";
 
-// sector-ETF period key -> member metric key (screener metrics)
+// sector-ETF period key -> member metric key
 const MEMBER_PERIODS = [["1d", "chg1d", "1 day"], ["1w", "chg5d", "1 week"], ["1m", "chg20d", "1 month"], ["3m", "chg60d", "3 months"], ["1y", "chg1y", "1 year"]];
+const REGION_NAME = { us: "United States", eu: "Europe" };
 
-async function sectorPage(root, region, etf, ctx) {
+// Sector page (and, with an industry, the industry inside it): ETF against the market, top and bottom movers,
+// then the shared stock table - grouped by industry, a click on an industry goes one level down.
+async function sectorPage(root, region, etf, industry, ctx) {
   const body = h("div", null, loading("Loading the sector's members…"));
-  root.append(h("p", { class: "small" }, h("a", { href: "#/sectors" }, "← all sectors")), body);
+  const head = h("div");
+  root.append(head, body);
   const d = await api(`/api/sectors/${region}/${encodeURIComponent(etf)}`, { ttl: 300000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
+  const base = `#/sectors/${region}/${encodeURIComponent(etf)}`;
+  clear(head, crumbs([["Markets", "#/markets"], ["Sectors", "#/sectors"], [REGION_NAME[region], "#/sectors"], [d.sector, base], ...(industry ? [[industry]] : [])]));
+  const rows = industry ? d.rows.filter((r) => r.industry === industry) : d.rows;
   let period = localStorage.getItem("sd.secPeriod") || "1m";
   if (!MEMBER_PERIODS.some((p) => p[0] === period)) period = "1m";
   const e = d.etf_row || {}, b = d.benchmark || {};
-  const draw = () => {
+  const movers = h("div");
+  const drawMovers = () => {
     const [, mk, plabel] = MEMBER_PERIODS.find((p) => p[0] === period);
-    const sorted = [...d.rows].filter((r) => r[mk] != null).sort((x, y) => y[mk] - x[mk]);
+    const sorted = rows.filter((r) => r[mk] != null).sort((x, y) => y[mk] - x[mk]);
     const up = sorted.filter((r) => r[mk] > 0).length;
-    const mini = (rows) => table([
+    const mini = (list) => table([
       { label: "", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.symbol) },
       { label: "", render: (r) => h("span", { class: "small" }, r.name) },
-      { label: plabel, num: true, cls: (r) => dir(r[mk]), render: (r) => pct(r[mk], 1) }], rows);
-    clear(body,
-      h("div", { class: "pagehead" }, h("h1", null, d.sector), h("span", { class: "meta" }, `${region === "us" ? "United States" : "Europe"} · ${d.n} stocks · ETF `,
-        h("a", { href: "#/stock/" + encodeURIComponent(d.etf) }, d.etf))),
-      h("div", { class: "keystrip" }, MEMBER_PERIODS.map(([k, , label]) => h("div", null, h("span", { class: "k" }, label),
-        h("span", { class: "v " + dir(e[k]) }, pct(e[k], 1)), h("span", { class: "small muted" }, ` vs ${pct(b[k], 1)}`)))),
+      { label: plabel, num: true, cls: (r) => dir(r[mk]), render: (r) => pct(r[mk], 1) }], list);
+    clear(movers,
       h("div", { class: "toolbar" }, MEMBER_PERIODS.map(([k, , label]) => h("button", { class: "linkish", style: { fontWeight: k === period ? 700 : 400 },
-        onclick: () => { period = k; localStorage.setItem("sd.secPeriod", k); draw(); } }, label)),
+        onclick: () => { period = k; localStorage.setItem("sd.secPeriod", k); drawMovers(); } }, label)),
         h("span", { class: "small muted", style: { marginLeft: "14px" } }, sorted.length ? `${up} of ${sorted.length} up over ${plabel} (${Math.round((up / sorted.length) * 100)}%)` : "")),
-      h("div", { class: "cols" }, section("Top movers", mini(sorted.slice(0, 8))), section("Bottom movers", mini(sorted.slice(-8).reverse()))),
-      section(`All ${d.n} members`, h("div", { class: "scroll" }, table([
-        { label: "Symbol", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.symbol) },
-        { label: "Name", render: (r) => r.name }, { label: "Industry", render: (r) => h("span", { class: "small muted" }, r.sub) },
-        { label: "Last", num: true, render: (r) => price(r.last) },
-        ...MEMBER_PERIODS.map(([, k, label]) => ({ label, num: true, cls: (r) => dir(r[k]), render: (r) => pct(r[k], 1) })),
-        { label: "From 52w high", num: true, cls: (r) => dir(r.from_high), render: (r) => pct(r.from_high, 1) },
-        { label: "Mkt cap", num: true, render: (r) => big(r.market_cap) },
-        { label: "In", render: (r) => h("span", { class: "small muted" }, r.indices.join(", ")) },
-      ], sorted.concat(d.rows.filter((r) => r[mk] == null)))), note(d.note)));
-    ctx.setContext({ page: `Sector ${d.sector}`, region, etf: d.etf, period, etf_returns: e, benchmark: b,
-      members_up: `${up} of ${sorted.length}`, top: sorted.slice(0, 8).map((r) => ({ symbol: r.symbol, name: r.name, move: r[mk] })),
-      bottom: sorted.slice(-8).map((r) => ({ symbol: r.symbol, name: r.name, move: r[mk] })) });
+      h("div", { class: "cols" }, section("Top movers", mini(sorted.slice(0, 6))), section("Bottom movers", mini(sorted.slice(-6).reverse()))));
   };
-  draw();
-}
-
-const PERIODS = [["1d", "1 day"], ["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["ytd", "YTD"], ["1y", "1 year"]];
-
-function tileColor(v, scale) {
-  if (v == null) return "var(--bg2)";
-  const a = Math.min(1, Math.abs(v) / scale) * 0.75 + 0.08;
-  return v >= 0 ? `rgba(22, 163, 74, ${a})` : `rgba(220, 38, 38, ${a})`;
+  drawMovers();
+  clear(body,
+    h("div", { class: "pagehead" }, h("h1", null, industry || d.sector), h("span", { class: "meta" }, `${industry ? d.sector + " · " : ""}${REGION_NAME[region]} · ${rows.length} stocks · sector ETF `,
+      h("a", { href: "#/stock/" + encodeURIComponent(d.etf) }, d.etf))),
+    industry ? null : h("div", { class: "keystrip" }, MEMBER_PERIODS.map(([k, , label]) => h("div", null, h("span", { class: "k" }, label),
+      h("span", { class: "v " + dir(e[k]) }, pct(e[k], 1)), h("span", { class: "small muted" }, ` vs ${pct(b[k], 1)}`)))),
+    movers,
+    section(industry ? "Stocks" : "Industries and stocks", stockTable(rows, { ctx, name: `Sector ${d.sector}${industry ? " / " + industry : ""}`, lockGroup: true,
+      group: industry ? "none" : "industry", onGroup: industry ? null : (_k, code) => ctx.go(`${base}/${encodeURIComponent(code)}`) })),
+    note(d.note));
 }
 
 export async function render(root, params, ctx) {
-  if (params[0] && params[1]) return sectorPage(root, params[0], decodeURIComponent(params[1]), ctx);
+  if (params[0] && params[1]) return sectorPage(root, params[0], decodeURIComponent(params[1]), params[2] ? decodeURIComponent(params[2]) : null, ctx);
   let period = localStorage.getItem("sd.secPeriod") || "1m", rel = localStorage.getItem("sd.secRel") === "1";
   const bar = h("div", { class: "toolbar" }), body = h("div", null, loading());
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Sectors"), h("span", { class: "meta" }, "where the money went, by region")), bar, body);
+  root.append(crumbs([["Markets", "#/markets"], ["Sectors"]]), h("div", { class: "pagehead" }, h("h1", null, "Sectors"), h("span", { class: "meta" }, "where the money went, by region")), bar, body);
   const data = await Promise.all(["us", "eu"].map((r) => api("/api/sectors/" + r, { ttl: 300000 })));
 
   const draw = () => {

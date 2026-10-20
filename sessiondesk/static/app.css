@@ -252,3 +252,8 @@ table.grid caption .csvbtn:hover { color: var(--link); }
   border: 1px solid var(--line2); border-top: 0; max-height: 280px; overflow-y: auto; }
 .suggest li { padding: 5px 8px; font-size: 13px; border-bottom: 1px solid var(--line); }
 .suggest li.click { cursor: pointer; } .suggest li.click:hover { background: var(--hi); }
+/* breadcrumb trail of the Markets tree */
+.crumbs { margin: 0 0 4px; color: var(--muted); }
+.crumbs a { color: var(--link); }
+.stocktable [hidden] { display: none !important; }
+.stocktable .toolbar select { max-width: 190px; }

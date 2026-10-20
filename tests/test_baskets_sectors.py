@@ -96,3 +96,17 @@ def test_canonical_sector_and_drilldown_errors(client):
     from sessiondesk.features import universe
     assert all(cs(m.get("sector"), m.get("industry")) for u in universe.UNIVERSES for m in universe.members(u))   # nothing unmapped
     assert "error" in client.get("/api/sectors/us/NOPE").json()
+
+
+def test_stocklist_scopes_and_merge():
+    from sessiondesk.features import stocklist
+    assert stocklist.scope_universes("index:dax40") == ("DAX 40", ["dax40"])
+    assert stocklist.scope_universes("region:us")[1] == ["sp500", "nasdaq100", "dow30"]
+    assert len(stocklist.scope_universes("nonsense")[1]) == 8
+    rows = stocklist.merge({"stoxx50": [{"symbol": "SIE.DE", "name": "Siemens", "sector": "Industrials", "industry": "", "chg1d": 1.0}],
+                            "dax40": [{"symbol": "SIE.DE", "name": "Siemens", "sector": "Industrials", "industry": "", "chg1d": 1.0},
+                                      {"symbol": "BMW.DE", "name": "BMW", "sector": "Automotive", "industry": "", "chg1d": -1.0}]})
+    sie = next(r for r in rows if r["symbol"] == "SIE.DE")
+    assert sie["indices"] == ["Euro Stoxx 50", "DAX 40"] and sie["group"] == "industrials" and sie["industry"] == "Industrials"
+    bmw = next(r for r in rows if r["symbol"] == "BMW.DE")
+    assert bmw["group_label"] == "Consumer discretionary" and bmw["industry"] == "Automotive" and len(rows) == 2

@@ -522,6 +522,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.cache.invalidate("movers")
         return await get_universes()
 
+    @app.get("/api/stocks")
+    async def get_stocks(scope: str = "all", group: str | None = None, industry: str | None = None):
+        from .features import stocklist
+        ctx = C()
+
+        async def build():
+            return await stocklist.stocks(ctx, scope, group, industry)
+        return await ctx.cache.get(f"stocks:{scope}:{group}:{industry}", 60, build)
+
     @app.get("/api/screener/{key}")
     async def get_screener(key: str):
         from .features import screener

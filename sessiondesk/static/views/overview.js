@@ -23,7 +23,7 @@ export async function render(root, _params, ctx) {
       const isRates = g.title === "Rates";
       left.appendChild(section(g.title, table([
         { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label),
-          withMembers[r.symbol] ? h("a", { class: "small muted", style: { marginLeft: "6px" }, href: "#/indices/" + withMembers[r.symbol], title: "members, breadth, drivers, valuation" }, "breadth ›") : null] },
+          withMembers[r.symbol] ? h("a", { class: "small muted", style: { marginLeft: "6px" }, href: "#/indices/" + withMembers[r.symbol], title: "members, breadth, drivers, valuation" }, "members ›") : null] },
         { label: "Last", num: true, render: (r) => isRates ? (r.price != null ? r.price.toFixed(3) + "%" : "–") : price(r.price) },
         { label: isRates ? "Δ bp" : "Δ %", num: true, cls: (r) => dir(r.change_pct),
           render: (r) => isRates ? signed(r.change_bp, 1) : pct(r.change_pct) },
