@@ -4,6 +4,14 @@ import { api } from "../lib/api.js";
 import { h, clear, table, section, num, pct, dir, big, price, sparkline, note, loading, errorBox } from "../lib/ui.js";
 import { stockTable, crumbs } from "../lib/stocktable.js";
 
+const PERIODS = [["1d", "1 day"], ["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["ytd", "YTD"], ["1y", "1 year"]];
+
+function tileColor(v, scale) {
+  if (v == null) return "var(--bg2)";
+  const a = Math.min(1, Math.abs(v) / scale) * 0.75 + 0.08;
+  return v >= 0 ? `rgba(22, 163, 74, ${a})` : `rgba(220, 38, 38, ${a})`;
+}
+
 // sector-ETF period key -> member metric key
 const MEMBER_PERIODS = [["1d", "chg1d", "1 day"], ["1w", "chg5d", "1 week"], ["1m", "chg20d", "1 month"], ["3m", "chg60d", "3 months"], ["1y", "chg1y", "1 year"]];
 const REGION_NAME = { us: "United States", eu: "Europe" };
