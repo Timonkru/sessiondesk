@@ -66,6 +66,7 @@ async function route() {
     const root = h("div");
     viewEl.appendChild(root);
     cleanup = (await mod.render(root, params, ctx)) || null;
+    if (seq === renderSeq) window.dispatchEvent(new Event("sd:rendered"));
   } catch (err) {
     console.error(err);
     if (seq === renderSeq) viewEl.appendChild(errorBox("This page failed to load: " + err.message));   // not on a page opened since
@@ -303,6 +304,56 @@ const pollSystem = async () => { const d = await api("/api/system", { fresh: tru
 window.addEventListener("sd:system", (e) => showSystem(e.detail));
 setTimeout(pollSystem, 20000);
 setInterval(pollSystem, 120000);
+
+// Tabs: open pages side by side inside one window. The active tab follows navigation; "+" keeps the current page
+// as a new tab; Ctrl+click on a nav link opens it in a new tab. Saved per window (sessionStorage) so two windows
+// can hold different tab sets.
+const TABS_KEY = "sd.tabs";
+let tabs = [];
+try { tabs = JSON.parse(sessionStorage.getItem(TABS_KEY) || "[]"); } catch { tabs = []; }
+let activeTab = Number(sessionStorage.getItem(TABS_KEY + ".active") || 0);
+function tabTitle(rendered = true) {
+  const { name, params } = parseRoute();
+  const navName = document.querySelector(`#nav a[data-route="${name === "ext" ? "ext:" + (params[0] || "") : name}"]`)?.textContent;
+  const h1 = rendered ? document.querySelector("#view h1")?.textContent : null;
+  return ((name === "stock" ? params[0] : null) || h1 || navName || "Today").slice(0, 28);
+}
+function saveTabs() { try { sessionStorage.setItem(TABS_KEY, JSON.stringify(tabs)); sessionStorage.setItem(TABS_KEY + ".active", String(activeTab)); } catch { /* storage off */ } }
+function drawTabs() {
+  const bar = $("tabbar");
+  if (tabs.length < 2) { clear(bar); return; }
+  clear(bar, tabs.map((t, i) => h("div", { class: "tab" + (i === activeTab ? " on" : ""), title: t.hash || "#/", onclick: () => { activeTab = i; saveTabs(); location.hash = t.hash || "#/"; drawTabs(); } },
+    t.title, h("span", { class: "x", title: "close tab", onclick: (e) => { e.stopPropagation(); closeTab(i); } }, "×"))),
+    h("button", { class: "add", title: "keep this page as a new tab", onclick: () => newTab(location.hash) }, "+"));
+}
+function newTab(hash) {
+  if (!tabs.length) tabs.push({ hash: location.hash, title: tabTitle() });
+  tabs.push({ hash, title: hash === location.hash ? tabTitle() : "…" });
+  activeTab = tabs.length - 1; saveTabs(); location.hash = hash || "#/"; drawTabs();
+}
+function closeTab(i) {
+  const wasActive = i === activeTab;
+  tabs.splice(i, 1);
+  if (i < activeTab || activeTab >= tabs.length) activeTab = Math.max(0, activeTab - 1);
+  const target = (tabs[activeTab] || {}).hash;
+  if (tabs.length < 2) { tabs = []; activeTab = 0; }
+  saveTabs(); drawTabs();
+  if (wasActive && target !== undefined) location.hash = target || "#/";
+}
+function trackTab(rendered = true) {   // the active tab follows wherever you navigate inside it
+  if (!tabs.length) return;
+  tabs[activeTab] = { hash: location.hash, title: tabTitle(rendered) };
+  saveTabs(); drawTabs();
+}
+$("nav").addEventListener("click", (e) => {
+  const a = e.target.closest("a[href^='#']");
+  if (a && (e.ctrlKey || e.metaKey || e.button === 1)) { e.preventDefault(); newTab(a.getAttribute("href")); }
+});
+$("newTab").addEventListener("click", () => newTab(location.hash));
+$("newWin").addEventListener("click", () => window.open(location.href, "_blank", "popup,width=1400,height=900"));
+window.addEventListener("sd:rendered", () => trackTab(true));
+window.addEventListener("hashchange", () => trackTab(false));
+drawTabs();
 
 // Back: the app window (--app) has no browser bar, so the desk brings its own. Only shown once there is a page to go back to.
 let depth = 0;
