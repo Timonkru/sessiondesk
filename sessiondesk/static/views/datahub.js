@@ -61,7 +61,8 @@ export async function render(root, params, ctx) {
     const pts = d.points.slice(-750);
     clear(detail, section(`${d.meta.name}`,
       lineChart(pts.map(([day, v]) => ({ x: day, y: v })), { height: 220, area: false, fmtY: (v) => num(v, Math.abs(v) < 10 ? 3 : 1), fmtX: (x) => x }),
-      h("p", { class: "small" }, `${d.points.length} observations from ${d.points[0]?.[0] || "–"} · source: ${d.meta.source} · `,
+      h("p", { class: "small" }, `${d.points.length} observations from ${d.points[0]?.[0] || "–"} · source: `,
+        d.meta.url ? h("a", { href: d.meta.url, ...(d.meta.url.startsWith("#") ? {} : { target: "_blank", rel: "noopener noreferrer" }) }, d.meta.source) : d.meta.source, " · ",
         h("a", { href: `/api/hub/csv/${encodeURIComponent(id)}?t=${encodeURIComponent(document.querySelector('meta[name="sd-token"]').content)}` }, "download CSV"))));
     ctx.setContext({ page: `Data hub series ${d.meta.name}`, meta: d.meta, last_points: d.points.slice(-60) });
   };
@@ -115,6 +116,7 @@ export async function render(root, params, ctx) {
         { label: "z", num: true, cls: (s) => (s.z != null && Math.abs(s.z) >= data.z_warn ? "warn" : ""), render: (s) => (s.z == null ? "–" : num(s.z, 1)) },
         { label: "Trend", num: true, render: (s) => sparkline(s.spark) },
         { label: "Date", render: (s) => h("span", { class: "muted small" }, s.day || "") },
+        { label: "Source", render: (s) => (s.url ? h("a", { class: "small", href: s.url, title: s.source, ...(s.url.startsWith("#") ? {} : { target: "_blank", rel: "noopener noreferrer" }) }, "↗") : "") },
         { label: "Obs.", num: true, render: (s) => s.n },
       ], rows.filter((s) => s.category === c)))),
       rows.length ? null : note(data.series.length ? "No series matches." : "Nothing collected yet - the collectors start a few minutes after launch, or press 'collect now'."));

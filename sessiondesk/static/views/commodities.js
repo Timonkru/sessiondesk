@@ -24,6 +24,7 @@ export async function render(root, _params, ctx) {
       { label: "Latest", num: true, render: (s) => num(s.last, 1) },
       { label: "Week change", num: true, cls: (s) => dir(s.change), render: (s) => (s.change == null ? "–" : `${s.change > 0 ? "+" : ""}${num(s.change, 1)}`) },
       { label: "Week", render: (s) => h("span", { class: "muted small" }, s.day) },
+      { label: "Source", render: (s) => (s.url ? h("a", { class: "small", href: s.url, target: "_blank", rel: "noopener noreferrer", title: s.source }, "EIA ↗") : "") },
     ], d.fundamentals || [], { empty: "Not collected yet - Data hub → collect now." }),
       note("Crude, products and US gas storage from the EIA weekly reports. Each series has its history, chart, CSV and early warnings in the Data hub.")),
     section("Connect for more", table([

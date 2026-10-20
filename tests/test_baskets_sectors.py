@@ -77,3 +77,11 @@ def test_fx_proxies_and_volume_stats():
     assert since["avg_n"] == 6 and since["avg250"] is None
     assert deep.merge_volume([{"t": 1, "v": 2}], [{"t": 1, "v": 3}, {"t": 2, "v": 1}]) == [{"t": 1, "v": 5}, {"t": 2, "v": 1}]
     assert deep.volume_stats([{"t": 0, "v": 5}] * 3, now=10 * day) is None
+
+
+def test_basket_delete_removes_hub_series(client):
+    ctx = client.app_state["ctx"]
+    b = client.post("/api/baskets", json={"name": "Gone", "members": "AAPL"}).json()["basket"]
+    ctx.db.upsert_series({"id": "basket:" + b["id"], "name": "Gone", "category": "Your baskets", "source": "s", "kind": "price"}, [("2026-01-02", 100.0)])
+    client.delete(f"/api/baskets/{b['id']}")
+    assert all(s["id"] != "basket:" + b["id"] for s in ctx.db.series_list())

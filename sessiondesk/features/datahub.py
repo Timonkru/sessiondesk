@@ -302,12 +302,36 @@ async def scan(ctx, publish: bool = True) -> list[dict]:
     return sorted(out, key=lambda x: -abs(x["data"]["z"]))
 
 
+EIA_GAS_REPORT = "https://ir.eia.gov/ngs/ngs.html"
+
+
+def source_url(series_id: str) -> str | None:
+    """Link to where the number comes from: the vendor's page for that series, or the app page that computes it (pure, tested)."""
+    kind, _, key = series_id.partition(":")
+    if kind == "fred":
+        return "https://fred.stlouisfed.org/series/" + key
+    if kind == "mkt":
+        return "https://finance.yahoo.com/quote/" + key
+    if kind == "eia":
+        code = next((c for n, c in EIA_ROWS.values() if n.lower().replace(" ", "_").replace(".", "") == key), None)
+        return EIA_HISTORY_URL.format(code=code) if code else "https://www.eia.gov/petroleum/supply/weekly/"
+    if kind == "eiagas":
+        region = key.split(":")[0]
+        code = next((c for r, c in EIA_GAS_HISTORY.items() if r.lower().replace(" ", "_") == region), None)
+        return EIA_GAS_HISTORY_URL.format(code=code.lower()) if code and not key.endswith(":vs5y") else EIA_GAS_REPORT
+    if kind == "basket":
+        return "#/baskets/" + key
+    if kind == "news":
+        return "#/news"
+    return None
+
+
 async def overview(ctx) -> dict:
     rows = []
     for s in await ctx.db.run(ctx.db.series_list):
         pts = await ctx.db.run(ctx.db.observations, s["id"], 90)
         a = assess(await ctx.db.run(ctx.db.observations, s["id"], 400), s["kind"]) if pts else None
-        rows.append({**s, "last": pts[-1][1] if pts else None, "day": pts[-1][0] if pts else None,
+        rows.append({**s, "url": source_url(s["id"]), "last": pts[-1][1] if pts else None, "day": pts[-1][0] if pts else None,
                      "change": a["change"] if a else None, "z": a["z"] if a else None,
                      "spark": [v for _, v in pts[-60:]]})
     warnings = [w for w in await ctx.db.run(ctx.db.alerts, 60, "hub") if w["ts"] > time.time() - 3 * 86400]

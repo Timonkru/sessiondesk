@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 
+from .datahub import source_url
 from .sectors import returns
 
 GROUPS = [
@@ -49,7 +50,7 @@ async def board(ctx) -> dict:
         if s["category"] in FUNDAMENTAL_CATEGORIES:
             pts = await ctx.db.run(ctx.db.observations, s["id"], 60)
             if pts:
-                fundamentals.append({**s, "last": pts[-1][1], "day": pts[-1][0], "prev": pts[-2][1] if len(pts) > 1 else None,
+                fundamentals.append({**s, "url": source_url(s["id"]), "last": pts[-1][1], "day": pts[-1][0], "prev": pts[-2][1] if len(pts) > 1 else None,
                                      "change": pts[-1][1] - pts[-2][1] if len(pts) > 1 else None})
     return {**prices, "fundamentals": fundamentals, "more_sources": [{"name": n, "access": a, "what": w} for n, a, w in MORE_SOURCES],
             "note": "Front-month futures (rolling contracts jump at expiry) and one uranium ETF, free daily closes. Inventories from the "

@@ -73,3 +73,12 @@ def test_hub_store_scan_and_csv(client):
     csv_text = client.get("/api/hub/csv/test:spread").text
     assert csv_text.startswith("date,value\n2020-01-01,") and csv_text.count("\n") == 202
     assert "error" in client.get("/api/hub/series/nope").json()
+
+
+def test_source_urls():
+    assert datahub.source_url("fred:DGS10") == "https://fred.stlouisfed.org/series/DGS10"
+    assert datahub.source_url("mkt:^GDAXI") == "https://finance.yahoo.com/quote/^GDAXI"
+    assert "s=WCESTUS1" in datahub.source_url("eia:crude_oil_stocks_excl_spr")
+    assert datahub.source_url("eiagas:lower_48_total").endswith("nw2_epg0_swo_r48_bcfw.htm")
+    assert datahub.source_url("eiagas:east:vs5y") == datahub.EIA_GAS_REPORT
+    assert datahub.source_url("basket:ab12") == "#/baskets/ab12" and datahub.source_url("x:y") is None

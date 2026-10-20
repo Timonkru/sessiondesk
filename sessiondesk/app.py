@@ -430,7 +430,9 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         meta = next((s for s in await ctx.db.run(ctx.db.series_list) if s["id"] == series_id), None)
         if not meta:
             return {"error": "unknown series"}
-        return {"meta": meta, "points": await ctx.db.run(ctx.db.observations, series_id, min(limit, 10000))}
+        from .features import datahub
+        return {"meta": {**meta, "url": datahub.source_url(series_id)},
+                "points": await ctx.db.run(ctx.db.observations, series_id, min(limit, 10000))}
 
     @app.get("/api/hub/csv/{series_id}")
     async def get_hub_csv(series_id: str):
@@ -466,6 +468,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     @app.delete("/api/baskets/{basket_id}")
     async def delete_basket(basket_id: str):
         from .features import baskets
+        await C().db.run(C().db.delete_series, "basket:" + basket_id)      # its Data hub series goes with it
         return baskets.delete(C(), basket_id)
 
     @app.get("/api/commodities")
