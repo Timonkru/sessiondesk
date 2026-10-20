@@ -287,7 +287,7 @@ POWER_ZONES = [("DE-LU", "Germany"), ("FR", "France"), ("NL", "Netherlands"), ("
                ("CH", "Switzerland"), ("IT-North", "Italy North"), ("ES", "Spain"), ("PL", "Poland"), ("DK1", "Denmark West"),
                ("NO2", "Norway South"), ("SE3", "Sweden Central")]
 POWER_PAUSE = 20.0                                  # seconds between zones; the API answers 429 to quick bursts
-SLOW_COLLECTORS = {"power", "entsog", "agsi"}       # "collect now" starts these in the background
+SLOW_COLLECTORS = {"power", "entsog", "agsi", "iv"}       # "collect now" starts these in the background
 
 
 def _berlin():
@@ -539,9 +539,63 @@ async def collect_agsi(ctx) -> int:
     return n
 
 
+# ------------------------------------------------------------------ implied volatility history
+# 30-day at-the-money implied volatility per underlying, once per US session day. Option quotes are only live
+# during US hours (outside them Yahoo's IVs are placeholders), so the collector only records then.
+IV_UNDERLYINGS = ["SPY", "QQQ", "IWM", "DIA", "EEM", "EWG", "GLD", "SLV", "USO", "TLT", "HYG", "FXE", "FXY", "UUP"]
+
+
+def iv30(rows: list[dict], target: int = 30) -> float | None:
+    """Constant-maturity ATM IV: linear in total variance (iv^2 x days) between the expiries around the target;
+    with only one side, the nearest expiry within 10-60 days (pure, tested)."""
+    pts = sorted((r["days"], r["atm_iv"]) for r in rows if r.get("atm_iv") and r.get("days"))
+    below = [p for p in pts if p[0] <= target]
+    above = [p for p in pts if p[0] > target]
+    if below and above:
+        (d1, v1), (d2, v2) = below[-1], above[0]
+        w1, w2 = v1 * v1 * d1, v2 * v2 * d2
+        w = w1 + (w2 - w1) * (target - d1) / (d2 - d1)
+        return (w / target) ** 0.5 if w > 0 else None
+    near = [p for p in pts if 10 <= p[0] <= 60]
+    return min(near, key=lambda p: abs(p[0] - target))[1] if near else None
+
+
+def us_options_live(now=None) -> bool:
+    import datetime as dt
+    t = now or dt.datetime.now(dt.timezone.utc)
+    return t.weekday() < 5 and (13 * 60 + 45) <= t.hour * 60 + t.minute <= 20 * 60
+
+
+async def collect_iv(ctx) -> int:
+    if not us_options_live():
+        return 0
+    import asyncio
+    import datetime as dt
+    from .deep import options
+    watch = [s for s in (ctx.settings.get("watchlist") or []) if s.replace("-", "").isalpha() and len(s) <= 5]
+    day = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    n = 0
+    for sym in list(dict.fromkeys(IV_UNDERLYINGS + watch))[:40]:
+        try:
+            d = await options(ctx, sym)
+        except Exception:
+            continue
+        if "error" in d or not d.get("live_quotes"):
+            continue
+        iv = iv30(d.get("expiries") or [])
+        if iv is None:
+            continue
+        await ctx.db.run(ctx.db.upsert_series, _meta(f"iv:{sym}", f"{sym} implied volatility 30d (ATM, %)", "Implied volatility",
+                                                     "Yahoo option chains (live quotes only), SessionDesk interpolation", "rate"),
+                         [(day, round(iv * 100, 2))])
+        n += 1
+        await asyncio.sleep(1.0)                    # be polite: one option chain after the other
+    return n
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
               "news": (collect_news, 3600), "power": (collect_power, 3 * 3600), "entsog": (collect_entsog, 6 * 3600),
-              "agsi": (collect_agsi, 6 * 3600)}
+              "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views

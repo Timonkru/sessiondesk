@@ -223,3 +223,14 @@ def test_agsi_key_needed_then_collected_without_leaking(client, monkeypatch):
         lambda r: httpx.Response(200, json={"error": "access denied", "message": "Invalid or missing API key", "data": []})))
     assert asyncio.run(datahub.collect_agsi(ctx)) == 0                  # wrong key: stops, health shows the error
     assert "access denied" in ctx.hub.health["agsi"]["last_error"]
+
+
+def test_iv30_interpolation_and_hours():
+    import datetime as dt
+    rows = [{"days": 20, "atm_iv": 0.20}, {"days": 40, "atm_iv": 0.30}, {"days": 5, "atm_iv": None}]
+    v = datahub.iv30(rows)                                   # total variance 0.8 at 20 d, 3.6 at 40 d -> 2.2 at 30 d
+    assert abs(v - (2.2 / 30) ** 0.5) < 1e-9
+    assert datahub.iv30([{"days": 45, "atm_iv": 0.25}]) == 0.25 and datahub.iv30([{"days": 90, "atm_iv": 0.25}]) is None
+    assert datahub.us_options_live(dt.datetime(2026, 10, 20, 15, 0, tzinfo=dt.timezone.utc))
+    assert not datahub.us_options_live(dt.datetime(2026, 10, 20, 7, 0, tzinfo=dt.timezone.utc))
+    assert not datahub.us_options_live(dt.datetime(2026, 10, 24, 15, 0, tzinfo=dt.timezone.utc))      # Saturday

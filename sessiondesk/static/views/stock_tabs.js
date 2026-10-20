@@ -293,6 +293,7 @@ async function options(c) {
   const ex = d.expiries || [];
   return h("div", null,
     d.proxy ? note(`Spot ${d.proxy.pair} has no listed options; these are the options of the currency ETF ${d.proxy.options}.`) : null,
+    d.iv_history ? note(`30-day implied volatility in SessionDesk's own record: ${num(d.iv_history.last, 1)}% now, range ${num(d.iv_history.min, 1)}-${num(d.iv_history.max, 1)}% over ${d.iv_history.n} sessions since ${d.iv_history.since} - higher than ${Math.round(d.iv_history.rank)}% of them. Series iv:${c.symbol} in the Data hub.`) : null,
     d.live_quotes === false ? note("No live option quotes right now (US options trade 15:30-22:00 CET). Implied volatility is shown only from live bid/ask; straddle and implied move use the last trades.", "warn") : null,
     kv([["Spot", price(d.spot)], ["Put/call open interest", n1(d.put_call_oi)], ["Put/call volume", n1(d.put_call_volume)], ["Max pain (nearest expiry)", price(d.max_pain_nearest)]]),
     ex.some((x) => x.atm_iv != null) ? section("Implied volatility term structure", bars(ex.map((x) => ({ label: x.expiry.slice(5), value: x.atm_iv == null ? null : x.atm_iv * 100 })), { height: 150, fmt: (v) => v.toFixed(0) + "%" })) : null,

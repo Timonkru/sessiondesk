@@ -311,6 +311,14 @@ def _options(symbol: str, spot: float | None, must_cover: str | None = None) -> 
         after = next((e for e in listed if e >= must_cover), None)
         if after and after not in expiries:
             expiries.append(after)
+    # always the expiries around 30 days (underlyings with daily expiries would otherwise end within a week),
+    # so a 30-day implied volatility can be interpolated and the term structure reaches a month
+    today = dt.date.today()
+    dated = [(e, (dt.date.fromisoformat(e) - today).days) for e in listed]
+    for pick in ([e for e, d in dated if d < 30][-1:] + [e for e, d in dated if d >= 30][:2]):
+        if pick not in expiries:
+            expiries.append(pick)
+    expiries = sorted(expiries)
     if not expiries:
         return {"error": "no listed options for this symbol"}
     if not spot:
@@ -618,13 +626,22 @@ async def options(ctx, symbol: str) -> dict:
             return d
         return await ctx.cache.get(f"deep:opt:{symbol}", 900, build_proxy)
 
+    async def with_history(d: dict) -> dict:
+        pts = await ctx.db.run(ctx.db.observations, f"iv:{symbol}", 400) if ctx.db else []
+        if len(pts) >= 5:
+            vals = [v for _, v in pts]
+            last = vals[-1]
+            d = {**d, "iv_history": {"n": len(vals), "since": pts[0][0], "last": last, "min": min(vals), "max": max(vals),
+                                     "rank": sum(1 for v in vals if v <= last) / len(vals) * 100}}
+        return d
+
     async def build():
         from .valuation import profile
         day, prof = await asyncio.gather(history(ctx, symbol, "1d"), profile(ctx, symbol))
         earn = prof.get("earnings_ts") or prof.get("earnings_start") if "error" not in prof else None
         cover = dt.datetime.fromtimestamp(earn, dt.timezone.utc).date().isoformat() if earn and earn > dt.datetime.now().timestamp() else None
         return await asyncio.to_thread(_options, symbol, day.get("price") if "error" not in day else None, cover)
-    return await ctx.cache.get(f"deep:opt:{symbol}", 900, build)
+    return await with_history(await ctx.cache.get(f"deep:opt:{symbol}", 900, build))
 
 
 def benchmark_for(symbol: str) -> str:
