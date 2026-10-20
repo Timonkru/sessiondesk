@@ -593,9 +593,14 @@ async def collect_iv(ctx) -> int:
     return n
 
 
+async def _collect_rates(ctx) -> int:
+    from .rates_world import collect
+    return await collect(ctx)
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
               "news": (collect_news, 3600), "power": (collect_power, 3 * 3600), "entsog": (collect_entsog, 6 * 3600),
-              "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600)}
+              "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600), "rates": (_collect_rates, 6 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views

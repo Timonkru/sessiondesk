@@ -7,9 +7,10 @@ import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBo
 
 export async function render(root, _params, ctx) {
   const mk = () => h("div", null, loading());
-  const rates = mk(), fed = mk(), vol = mk(), risk = mk(), pc = mk(), cot = mk(), growth = mk(), credit = mk(), euro = mk(), intl = mk();
+  const rates = mk(), fed = mk(), vol = mk(), risk = mk(), pc = mk(), cot = mk(), growth = mk(), credit = mk(), euro = mk(), intl = mk(), world = mk();
   const TABS = [
-    ["rates", "Rates", h("div", { class: "cols" }, section("US Treasury curve", rates), section("Fed funds path (futures)", fed))],
+    ["rates", "Rates", h("div", null, section("Government yields and policy rates by country", world),
+      h("div", { class: "cols" }, section("US Treasury curve", rates), section("Fed funds path (futures)", fed)))],
     ["growth", "Inflation & growth", h("div", null, section("By country", intl), section("United States in detail", growth))],
     ["credit", "Credit & liquidity", h("div", { class: "cols" }, section("US credit and liquidity", credit), section("Euro area: 10-year yields and spreads to Germany", euro))],
     ["risk", "Volatility & risk", h("div", { class: "cols" }, h("div", null, section("Volatility", vol), section("Put/call (SPY, QQQ options)", pc)), section("Risk appetite", risk))],
@@ -47,6 +48,20 @@ export async function render(root, _params, ctx) {
     if (g.error) { clear(growth, errorBox(g.error)); return; }
     facts.inflation_growth = g.rows;
     clear(growth, fredTable(g.rows, fmtVal), note(`${g.source}. Changes are against the previous release of each series.`));
+    push();
+  });
+  api("/api/macro/world", { ttl: 600000 }).then((d) => {
+    if (d.error) { clear(world, errorBox(d.error)); return; }
+    facts.rates_by_country = d.rows;
+    const y = (v) => (v == null ? "–" : num(v, 2));
+    clear(world, h("div", { class: "scroll" }, table([
+      { label: "", render: (r) => h("a", { href: r.url, target: "_blank", rel: "noopener noreferrer", title: r.source, style: { color: "inherit" } }, h("strong", null, r.country)) },
+      { label: "Policy rate", num: true, render: (r) => (r.policy == null ? h("span", { class: "muted", title: r.policy_name }, "–") : h("span", { title: r.policy_name }, y(r.policy))) },
+      ...d.tenors.map((t) => ({ label: t, num: true, render: (r) => y(r[t]) })),
+      { label: "2s10s bp", num: true, cls: (r) => dir(r.s2s10), render: (r) => (r.s2s10 == null ? "–" : signed(r.s2s10, 0)) },
+      { label: "2y - policy bp", num: true, cls: (r) => dir(r.gauge_bp), render: (r) => (r.gauge_bp == null ? "–" : signed(r.gauge_bp, 0) + (r.gauge_tenor !== "2y" ? ` (${r.gauge_tenor})` : "")) },
+      { label: "Date", render: (r) => h("span", { class: "small muted" }, r.date || "–") },
+    ], d.rows)), note(d.note + " The UK row: 3m = SONIA overnight, 30y = 20-year point. Each country links to its source; the 2y/5y/10y and policy rates are also Data hub series (Rates by country)."));
     push();
   });
   api("/api/macro/international", { ttl: 600000 }).then((d) => {

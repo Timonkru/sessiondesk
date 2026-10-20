@@ -620,10 +620,14 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return await screener.screen(ctx, key)
         return await ctx.cache.get(f"screen:{key}", 60, build)
 
+    async def _rates_world(ctx):
+        from .features import rates_world
+        return await rates_world.world(ctx)
+
     @app.get("/api/macro/{panel}")
     async def get_macro(panel: str):
         fn = {"rates": macro.rates, "fedpath": macro.fed_path, "vol": macro.vol, "risk": macro.risk_ratios, "cot": macro.cot,
-              "growth": macro.growth, "credit": macro.credit, "international": macro.international,
+              "growth": macro.growth, "credit": macro.credit, "international": macro.international, "world": _rates_world,
               "putcall": indices.putcall, "factset": indices.factset}.get(panel)
         if not fn:
             return {"error": "unknown panel"}
@@ -1127,6 +1131,7 @@ def background(ctx) -> list:
         every(lambda: 3600, hub_loop("news"), first_delay=150, name="hub news"),
         every(lambda: 3 * 3600, hub_loop("power"), first_delay=300, name="hub power"),
         every(lambda: 2 * 3600, hub_loop("iv"), first_delay=480, name="hub implied vol"),
+        every(lambda: 6 * 3600, hub_loop("rates"), first_delay=540, name="hub rates by country"),
         every(lambda: 6 * 3600, hub_loop("entsog"), first_delay=360, name="hub entsog"),
         every(lambda: 6 * 3600, hub_loop("agsi"), first_delay=420, name="hub agsi"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
