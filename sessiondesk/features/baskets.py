@@ -81,6 +81,16 @@ def delete(ctx, basket_id: str) -> dict:
     return {"baskets": baskets}
 
 
+def _name(ctx, symbol: str) -> str:
+    """Company name from the bundled index lists, else from a cached profile; empty when unknown."""
+    from . import universe
+    m = universe.lookup(symbol)
+    if m:
+        return m.get("name") or ""
+    prof = ctx.cache.peek(f"profile:v2:{symbol}", disk=True) or {}
+    return prof.get("name") or "" if "error" not in prof else ""
+
+
 async def view(ctx, basket_id: str) -> dict:
     b = next((x for x in all_baskets(ctx) if x["id"] == basket_id), None)
     if not b:
@@ -101,7 +111,7 @@ async def view(ctx, basket_id: str) -> dict:
     for m in b["members"]:
         pts = series.get(m["symbol"])
         r = returns(pts) if pts else {}
-        rows.append({**m, "last": pts[-1][1] if pts else None, **r, "missing": not pts,
+        rows.append({**m, "name": _name(ctx, m["symbol"]), "last": pts[-1][1] if pts else None, **r, "missing": not pts,
                      "contrib_1m": (m["weight"] * r["1m"]) if r.get("1m") is not None else None})
     if line:
         await ctx.db.run(ctx.db.upsert_series, {"id": f"basket:{basket_id}", "name": f"Basket {b['name']}", "category": "Your baskets",
