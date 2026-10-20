@@ -12,6 +12,8 @@ export async function render(root, _params, ctx) {
   const facts = {};
   const push = () => ctx.setContext({ page: "Markets overview", ...facts });
 
+  // Indices with a bundled member list get a link to their breadth page next to the name.
+  const withMembers = Object.fromEntries(((await api("/api/universes", { ttl: 600000 })).items || []).map((u) => [u.symbol, u.key]));
   const board = async () => {
     const d = await api("/api/overview", { fresh: true });
     if (d.error) { clear(left, errorBox(d.error)); return; }
@@ -20,7 +22,8 @@ export async function render(root, _params, ctx) {
     for (const g of groups) {
       const isRates = g.title === "Rates";
       left.appendChild(section(g.title, table([
-        { label: "", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label) },
+        { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label),
+          withMembers[r.symbol] ? h("a", { class: "small muted", style: { marginLeft: "6px" }, href: "#/indices/" + withMembers[r.symbol], title: "members, breadth, drivers, valuation" }, "breadth ›") : null] },
         { label: "Last", num: true, render: (r) => isRates ? (r.price != null ? r.price.toFixed(3) + "%" : "–") : price(r.price) },
         { label: isRates ? "Δ bp" : "Δ %", num: true, cls: (r) => dir(r.change_pct),
           render: (r) => isRates ? signed(r.change_bp, 1) : pct(r.change_pct) },

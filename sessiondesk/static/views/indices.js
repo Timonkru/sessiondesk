@@ -11,7 +11,8 @@ export async function render(root, params, ctx) {
     h("button", { class: k === key ? "on" : "", onclick: () => ctx.go("#/indices/" + k) }, label)));
   const body = h("div", null, loading("Loading member history… (first load of an index takes up to a minute)"));
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Indices & breadth"),
-    h("span", { class: "meta" }, "participation, contributions and valuation from member data")), tabBar, body);
+    h("span", { class: "meta" }, "participation, contributions and valuation from member data")), tabBar,
+    h("p", { class: "small muted" }, `Breadth, drivers and valuation need the list of members; it is bundled for these ${INDICES.length} indices. The other indices on Markets have price, chart, performance and options on their own page.`), body);
 
   const d = await api("/api/indices/" + key, { ttl: 60000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }

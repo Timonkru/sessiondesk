@@ -19,6 +19,11 @@ async function overview(c) {
   const s = c.state.summary || {}, p = s.profile || {}, q = s.quote || {};
   const glance = h("div", null, loading("Collecting the key facts…"));
   const wireBox = h("div", null, loading("Looking for headlines…"));
+  const memberLink = h("div");
+  if (!isEquity(c)) api("/api/universes", { ttl: 600000 }).then((u) => {
+    const hit = (u.items || []).find((x) => x.symbol === c.symbol);
+    if (hit) clear(memberLink, h("p", null, h("a", { href: "#/indices/" + hit.key }, `${hit.name}: ${hit.members} members, breadth, drivers and valuation →`)));
+  });
   api(`/api/stock/${c.enc}/news`, { ttl: 60000 }).then((d) => {
     const items = [...(d.wire || []), ...(d.items || [])].sort((x, y) => (y.published || 0) - (x.published || 0)).slice(0, 5);
     c.state.blocks.headlines_latest = items.map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact }));
@@ -40,7 +45,7 @@ async function overview(c) {
         ["Next earnings", earn ? stamp(earn) : "–"], ["Employees", p.employees ? big(p.employees) : "–"],
       ].filter(([, v]) => isEquity(c) || v !== "–"))),
       s.profile_pending ? note("Fundamentals are still loading…", "loading") : null),
-    h("div", null, section("At a glance", glance), section("Latest headlines", wireBox), p.summary ? section("About", h("p", { class: "small", style: { color: "var(--fg2)" } }, p.summary),
+    h("div", null, memberLink, section("At a glance", glance), section("Latest headlines", wireBox), p.summary ? section("About", h("p", { class: "small", style: { color: "var(--fg2)" } }, p.summary),
       p.website ? ext(p.website, p.website.replace(/^https?:\/\//, "")) : null) : null));
   // Facts from the other blocks, loaded in parallel.
   (async () => {

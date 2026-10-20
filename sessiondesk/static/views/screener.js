@@ -23,7 +23,8 @@ export async function render(root, params, ctx) {
   localStorage.setItem("sd.screenU", key);
   const tabBar = h("div", { class: "tabs" }, UNIVERSES.map(([k, label]) => h("button", { class: k === key ? "on" : "", onclick: () => ctx.go("#/screener/" + k) }, label)));
   const body = h("div", null, loading("Loading member history… (first load of a universe takes up to a minute)"));
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Screener"), h("span", { class: "meta" }, "filter and sort index members")), tabBar, body);
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Screener"), h("span", { class: "meta" }, "filter and sort index members")), tabBar,
+    h("p", { class: "small muted" }, "The screener works on the same bundled member lists as Indices & breadth and Movers; sectors of a whole region are under Sectors."), body);
 
   const d = await api("/api/screener/" + key, { ttl: 60000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
