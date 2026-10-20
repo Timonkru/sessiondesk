@@ -12,6 +12,10 @@ key**. Nothing is sent anywhere except to the sources you enable.
 > SessionDesk is a research and monitoring tool. It never places, changes or closes orders, and it
 > is not investment advice. Free data can be delayed or wrong; every panel names its source.
 
+**Made by [Krueger Algorithms](https://kruegeralgorithms.com/en)**: market research with published methods, and
+tools for prop traders (risk guardian, position sizer, trade copier, correlation check) on the
+[MQL5 Market](https://www.mql5.com/en/users/sg_mephisot/seller). SessionDesk is free and open source.
+
 ## What is inside
 
 | Page | What it does |
@@ -161,4 +165,5 @@ Roadmap: [ROADMAP.md](ROADMAP.md). Index member lists are refreshed with
 MIT - see [LICENSE](LICENSE). Data from third-party sources stays subject to their terms; Yahoo
 Finance and the Forex Factory feed are unofficial endpoints meant for personal use.
 
-Built by [Krueger Algorithms](https://kruegeralgorithms.com).
+Built by [Krueger Algorithms](https://kruegeralgorithms.com/en). Research write-ups with their methods are on the website;
+the MetaTrader tools for prop traders are on the [MQL5 Market](https://www.mql5.com/en/users/sg_mephisot/seller).
