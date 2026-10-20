@@ -495,6 +495,38 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import commodities
         return await commodities.board(C())
 
+    # ------------------------------------------------------------------ My desk: the user's own screens of tiles
+    DEFAULT_DESK = {"active": 0, "layouts": [{"name": "Main", "tiles": [
+        {"type": "quotes", "w": 4, "params": {"symbols": "^GSPC,^NDX,^GDAXI,^STOXX50E,^N225,EURUSD=X,GC=F,CL=F,BTC-USD"}},
+        {"type": "chart", "w": 8, "params": {"symbol": "^GSPC", "range": "5d"}},
+        {"type": "news", "w": 4, "params": {"market": "", "impact": "high"}},
+        {"type": "calendar", "w": 4, "params": {"hours": 24}},
+        {"type": "alerts", "w": 4, "params": {}},
+        {"type": "hub", "w": 6, "params": {"ids": "fred:BAMLH0A0HYM2,mkt:^VIX", "range": "1y"}},
+        {"type": "sectors", "w": 6, "params": {"region": "us", "period": "1m"}},
+    ]}]}
+
+    @app.get("/api/desk")
+    async def get_desk():
+        d = C().settings.get("desk")
+        return d if isinstance(d, dict) and d.get("layouts") else DEFAULT_DESK
+
+    @app.put("/api/desk")
+    async def put_desk(request: Request):
+        body = await request.json()
+        layouts = body.get("layouts")
+        if not isinstance(layouts, list) or not layouts or len(layouts) > 12:
+            return {"error": "1 to 12 layouts"}
+        clean = []
+        for lay in layouts:
+            tiles = [t for t in (lay.get("tiles") or []) if isinstance(t, dict) and t.get("type")][:40]
+            clean.append({"name": str(lay.get("name") or "Desk")[:40],
+                          "tiles": [{"type": str(t["type"])[:20], "w": max(2, min(12, int(t.get("w") or 4))),
+                                     "params": {str(k)[:20]: str(v)[:400] for k, v in (t.get("params") or {}).items()}} for t in tiles]})
+        desk = {"active": max(0, min(len(clean) - 1, int(body.get("active") or 0))), "layouts": clean}
+        C().settings.replace("desk", desk)
+        return desk
+
     @app.get("/api/tankers")
     async def get_tankers():
         from .features import tankers

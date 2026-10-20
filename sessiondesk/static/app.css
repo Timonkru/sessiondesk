@@ -257,3 +257,16 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .crumbs a { color: var(--link); }
 .stocktable [hidden] { display: none !important; }
 .stocktable .toolbar select { max-width: 190px; }
+/* My desk: a 12-column grid of tiles; one column on narrow screens */
+.desk { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.desk .tile { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; background: var(--bg); min-width: 0; overflow: hidden; }
+.desk .tilehead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.desk .tiletitle { font-weight: 600; font-size: 13px; }
+.desk .tiletools { display: flex; gap: 6px; align-items: center; }
+.desk .tiletools select { padding: 1px 4px; font-size: 12px; }
+.desk .tilebody table.grid { font-size: 12px; }
+.desk .tileedit { display: grid; gap: 6px; }
+.desk .feed.compact li { padding: 4px 0; }
+.desk .heat { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+.deskadd input { margin-right: 4px; }
+@media (max-width: 900px) { .desk .tile { grid-column: span 12 !important; } }

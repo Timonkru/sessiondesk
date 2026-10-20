@@ -26,6 +26,7 @@ const VIEWS = {
   screener: () => import("./views/stocks.js"),           // old links
   stocks: () => import("./views/stocks.js"),
   alerts: () => import("./views/alerts.js"),
+  desk: () => import("./views/desk.js"),
   hub: () => import("./views/datahub.js"),
   sectors: () => import("./views/sectors.js"),
   baskets: () => import("./views/baskets.js"),
