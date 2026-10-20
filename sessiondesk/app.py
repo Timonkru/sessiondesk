@@ -36,7 +36,7 @@ from .db import DB
 from .events import Broker
 from .features import broker as broker_view
 from .features import calendar as calendar_mod
-from .features import deep, flows, indices, jobs, levels, macro, markets, movers, news, pricealerts, research, risk, stocks, today, valuation
+from .features import company, deep, flows, indices, jobs, levels, macro, markets, movers, news, pricealerts, research, risk, stocks, today, valuation
 from .settings import Secrets, Settings, data_dir, load_dotenv
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -259,7 +259,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def stock_deep(symbol: str, block: str):
         fn = {"statements": deep.statements, "street": deep.street, "ownership": deep.ownership, "options": deep.options,
               "performance": deep.performance, "earnings": deep.earnings, "dividends": deep.dividends,
-              "peers": deep.peers_table}.get(block)
+              "peers": deep.peers_table, "structure": company.structure}.get(block)
         if not fn:
             return {"error": "unknown block"}
         return await fn(C(), symbol)
@@ -831,6 +831,13 @@ def background(ctx) -> list:
     async def price_alert_check():
         await pricealerts.run_check(ctx)
 
+    async def company_watch():
+        from .features import assets as assets_mod
+        held = await news.held(ctx)
+        syms = [s for s in (ctx.settings.get("watchlist") or []) if not s.startswith("^") and "=" not in s]
+        syms += [s for s in held if not assets_mod.asset_of(s) and s not in syms]
+        await company.detect_changes(ctx, syms[:40])
+
     def hub_loop(name):
         async def run():
             from .features import datahub
@@ -965,6 +972,7 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("fred"), first_delay=200, name="hub fred"),
         every(lambda: 6 * 3600, hub_loop("eia"), first_delay=240, name="hub eia"),
         every(lambda: 3600, hub_loop("news"), first_delay=150, name="hub news"),
+        every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
         ctx.extras["push"].run(),

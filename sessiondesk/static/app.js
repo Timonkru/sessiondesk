@@ -233,7 +233,8 @@ function wirePush() {
     notify("Unusual move: " + alert.title, (alert.body || "").slice(0, 180));
   });
   on("hub_warning", ({ alert }) => {
-    toast(alert.title, alert.body, { kind: "high", onClick: () => ctx.go("#/hub/" + encodeURIComponent(alert.symbol)) });
+    const target = alert.kind === "company" ? `#/stock/${encodeURIComponent(alert.symbol)}/people` : "#/hub/" + encodeURIComponent(alert.symbol);
+    toast(alert.title, alert.body, { kind: "high", onClick: () => ctx.go(target) });
     notify(alert.title, alert.body);
   });
   on("price_alert", ({ alert }) => {

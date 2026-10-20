@@ -1,7 +1,7 @@
 // Tab renderers for the instrument page. Each returns one element; data comes from /api/stock/<sym>/deep/<block>.
 import { api } from "../lib/api.js";
 import { bars } from "../lib/chart.js";
-import { h, table, section, price, pct, big, num, ratio, dir, ago, stamp, note, loading, errorBox, ext, clear } from "../lib/ui.js";
+import { h, svg, table, section, price, pct, big, num, ratio, dir, ago, stamp, note, loading, errorBox, ext, clear } from "../lib/ui.js";
 
 const fr = (v, d = 1) => (v == null ? "–" : pct(v * 100, d));          // signed percent from a fraction
 const fp = (v, d = 1) => (v == null ? "–" : ratio(v, d));             // unsigned percent from a fraction
@@ -373,5 +373,95 @@ async function filings(c) {
     d.items || [], { empty: d.error ? d.error : "No filings (US listings only)." }));
 }
 
-export const TABS = { overview, financials, earnings, street, valuation, ownership, options, performance, peers, dividends, news, filings };
+
+// ================================================================== people & indices, network
+async function people(c) {
+  const d = await c.block("structure");
+  if (d.error) return fail(d);
+  c.state.blocks.structure = { board: d.board, officers: d.officers, indices: d.indices };
+  const w = (x) => (x.weight == null ? "–" : pct(x.weight * 100, 2, false));
+  return grid(
+    h("div", null,
+      section("Index membership", table([
+        { label: "Index", render: (x) => h("a", { href: "#/indices/" + x.key }, x.index) },
+        { label: "Weight (est.)", num: true, render: w },
+        { label: "Rank", num: true, render: (x) => (x.rank ? `#${x.rank} of ${x.members}` : "–") },
+        { label: "Basis", render: (x) => h("span", { class: "muted small" }, `${x.basis}, ${x.coverage} of ${x.members} members known`) },
+      ], d.indices || [], { empty: "Not a member of the bundled indices (S&P 500, Nasdaq-100, Dow 30, DAX 40, FTSE 100, CAC 40, SMI, Euro Stoxx 50)." }),
+        note("Estimates: the official weights use free-float factors and caps. Membership lists are refreshed with each index review.")),
+      section("Board (directors)", table([
+        { label: "Name", render: (b) => b.name }, { label: "Role", render: (b) => b.position || "" },
+        { label: "Shares held", num: true, render: (b) => big(b.shares) },
+        { label: "Last filing", render: (b) => h("span", { class: "muted small" }, `${b.last_date} ${b.last_transaction || ""}`) },
+      ], d.board || [], { empty: "No board list in the free data (usual for non-US companies)." }))),
+    h("div", null,
+      section("Executives", table([
+        { label: "Name", render: (o) => o.name }, { label: "Title", render: (o) => o.title || "" },
+        { label: "Age", num: true, render: (o) => o.age ?? "–" },
+        { label: "Pay", num: true, render: (o) => (o.pay ? big(o.pay) + (o.pay_year ? ` (${o.pay_year})` : "") : "–") },
+      ], d.officers || [], { empty: "No executives listed." })),
+      note(d.note + " Changes to board, executives and index membership of your watchlist and held stocks are checked every 6 hours and raised as alerts.")));
+}
+
+async function network(c) {
+  const sym = c.symbol;
+  const [st, own] = await Promise.all([c.block("structure"), isEquity(c) ? c.block("ownership") : Promise.resolve({})]);
+  const s = c.state.summary || {}, p = s.profile || {};
+  const W = 1000, H = 700, cx = W / 2, cy = 330;
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "netgraph", role: "img" });
+  const short = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+  // rows (top / bottom) and columns (left / right): every label gets its own lane, nothing overlaps
+  const groups = [
+    ["Indices", "top", (st.indices || []).map((x) => ({ label: x.index, sub: x.weight != null ? pct(x.weight * 100, 1, false) : "", size: x.weight, href: "#/indices/" + x.key }))],
+    ["Peers", "right", (s.peers || []).slice(0, 8).map((x) => ({ label: x, href: "#/stock/" + encodeURIComponent(x) }))],
+    ["People", "bottom", [...(st.board || []).slice(0, 5).map((b) => ({ label: b.name, sub: "director" })),
+      ...(st.officers || []).slice(0, 5).map((o) => ({ label: o.name.replace(/^(Mr|Ms|Mrs|Dr)\.\s+/, ""), sub: (o.title || "").slice(0, 24) }))].slice(0, 10)],
+    ["Holders", "left", ((own && own.institutions) || []).slice(0, 7).map((x) => ({ label: x.holder, sub: x.pct != null ? pct(x.pct * 100, 1, false) : "", size: x.pct }))],
+  ];
+  const HUB = { top: [cx, cy - 115], bottom: [cx, cy + 105], left: [cx - 175, cy], right: [cx + 175, cy] };
+  const facts = {};
+  for (const [name, side, nodes] of groups) {
+    facts[name] = nodes.map((n) => n.label + (n.sub ? ` (${n.sub})` : ""));
+    if (!nodes.length) continue;
+    const [gx, gy] = HUB[side];
+    root.appendChild(svg("line", { x1: cx, y1: cy, x2: gx, y2: gy, class: "netedge strong" }));
+    root.appendChild(svg("text", { x: gx, y: side === "bottom" ? gy + 18 : gy - 8, class: "netgroup", "text-anchor": "middle" }, name));
+    nodes.forEach((n, i) => {
+      let x, y, anchor;
+      if (side === "left" || side === "right") {
+        const step = Math.min(50, 330 / Math.max(1, nodes.length - 1));     // columns end above the people rows
+        x = side === "left" ? 205 : 795;
+        y = cy + (i - (nodes.length - 1) / 2) * step;
+        anchor = side === "left" ? "end" : "start";
+      } else if (side === "top") {
+        const step = Math.min(190, 760 / Math.max(1, nodes.length - 1));
+        x = cx + (i - (nodes.length - 1) / 2) * step; y = 70; anchor = "middle";
+      } else {                                      // bottom: two staggered rows
+        const cols = Math.ceil(nodes.length / 2), col = Math.floor(i / 2), step = Math.min(185, 900 / Math.max(1, cols));
+        x = cx + (col - (cols - 1) / 2) * step + (i % 2 ? step / 2 : 0) - (cols > 1 ? step / 4 : 0);
+        y = i % 2 ? 610 : 530; anchor = "middle";
+      }
+      const r = 5 + Math.min(14, Math.sqrt(Math.max(0, n.size || 0)) * 40);
+      root.appendChild(svg("line", { x1: gx, y1: gy, x2: x, y2: y, class: "netedge" }));
+      const g = svg("g", { class: "netnode" + (n.href ? " link" : "") });
+      g.appendChild(svg("circle", { cx: x, cy: y, r }));
+      const dx = anchor === "start" ? r + 6 : anchor === "end" ? -r - 6 : 0;
+      const dy = anchor === "middle" ? (side === "top" ? -r - 18 : r + 14) : 4;
+      g.appendChild(svg("text", { x: x + dx, y: y + dy, "text-anchor": anchor }, short(n.label, side === "bottom" ? 22 : 24)));
+      if (n.sub) g.appendChild(svg("text", { x: x + dx, y: y + dy + 13, "text-anchor": anchor, class: "netsub" }, n.sub));
+      if (n.href) g.addEventListener("click", () => c.go(n.href));
+      root.appendChild(g);
+    });
+  }
+  const center = svg("g", { class: "netcenter" });
+  center.appendChild(svg("circle", { cx, cy, r: 34 }));
+  center.appendChild(svg("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, sym));
+  if (p.sector) center.appendChild(svg("text", { x: cx, y: cy + 52, "text-anchor": "middle", class: "netsub" }, `${p.sector}${p.industry ? " · " + p.industry : ""}`));
+  root.appendChild(center);
+  c.state.blocks.network = facts;
+  return h("div", null, h("div", { class: "netwrap" }, root),
+    note("Indices sized by estimated weight, holders by share held (latest 13F), peers from the same index and industry. Click an index or a peer to open it. Supplier and customer links follow once they can be read from filings."));
+}
+
+export const TABS = { overview, financials, earnings, street, valuation, ownership, options, performance, peers, people, network, dividends, news, filings };
 export { loading };

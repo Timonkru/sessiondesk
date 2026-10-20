@@ -9,7 +9,7 @@ import * as T from "./stock_tabs.js";
 const RANGES = [["1d", "1D"], ["5d", "5D"], ["1mo", "1M"], ["3mo", "3M"], ["6mo", "6M"], ["1y", "1Y"], ["5y", "5Y"], ["max", "Max"]];
 const EQUITY_TABS = [["overview", "Overview"], ["financials", "Financials"], ["earnings", "Earnings"], ["street", "Estimates & analysts"],
   ["valuation", "Valuation"], ["ownership", "Ownership & short"], ["options", "Options"], ["performance", "Performance & risk"],
-  ["peers", "Peers"], ["dividends", "Dividends"], ["news", "News"], ["filings", "Filings"]];
+  ["peers", "Peers"], ["people", "People & indices"], ["network", "Network"], ["dividends", "Dividends"], ["news", "News"], ["filings", "Filings"]];
 const OTHER_TABS = [["overview", "Overview"], ["performance", "Performance & risk"], ["options", "Options"], ["news", "News"]];
 
 export async function render(root, params, ctx) {
