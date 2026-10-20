@@ -31,7 +31,7 @@ class AisStream(Connector):
     description = ("Live AIS positions of ships. SessionDesk counts tankers at oil chokepoints (Hormuz, Bab el-Mandeb, Suez, "
                    "Bosporus, Danish straits, Gulf of Finland, Singapore, Cape, Panama). Shore-based coverage: thin far "
                    "from land, ships can switch AIS off.")
-    verified = False
+    verified = True                   # live run with a real key on 2026-10-20
     default_enabled = True
 
     async def test(self) -> dict:

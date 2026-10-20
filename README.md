@@ -101,7 +101,7 @@ Settings, keys, cache, the news archive and job logs live in `~/.sessiondesk/` (
 | MetaTrader 5 bridge | free | accounts, positions, running EAs, deals, **calendar with actual values within ~2 s** |
 | Finnhub | your key (free tier) | fast news, company news, earnings; economic calendar on paid plans |
 | Financial Modeling Prep | your key (free tier) | fundamentals, vendor DCF, calendar with actuals |
-| aisstream.io | your key (free) | live AIS ship positions for the tanker monitor (not yet run with a live key) |
+| aisstream.io | your key (free) | live AIS ship positions for the tanker monitor |
 | Polygon.io | your key (paid) | real-time US snapshots, aggregates, news |
 | Alpha Vantage | your key (free tier) | news with sentiment |
 | Trading Economics | your key (paid) | economic calendar with actuals |
