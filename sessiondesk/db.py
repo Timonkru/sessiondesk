@@ -142,6 +142,12 @@ class DB:
             self._conn.executemany("INSERT OR REPLACE INTO obs VALUES (?,?,?)", [(meta["id"], d, v) for d, v in points])
             self._conn.commit()
 
+    def delete_series(self, series_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM obs WHERE series = ?", (series_id,))
+            self._conn.execute("DELETE FROM series WHERE id = ?", (series_id,))
+            self._conn.commit()
+
     def series_list(self) -> list[dict]:
         return self._exec("SELECT s.*, (SELECT COUNT(*) FROM obs o WHERE o.series = s.id) AS n FROM series s ORDER BY category, name")
 

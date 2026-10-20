@@ -37,11 +37,19 @@ def test_changes_and_assess():
 def test_parse_eia_table():
     text = ('"STUB_1","10/9/26","10/2/26","Difference","10/10/25","Percent Change"\n'
             '"Crude Oil","698.560","707.117","-8.557","831.530","-16.000"\n'
+            '"Commercial (Excluding SPR)","415.577","424.134","-8.557","423.785","-1.900"\n'
             '"Total Motor Gasoline","220.1","221.0","-0.9","210.0","4.8"\n'
             '"Something else","1","2","3","4","5"\n')
     rows = datahub.parse_eia_table(text)
-    assert [r["name"] for r in rows] == ["Crude oil stocks excl. SPR", "Gasoline stocks"]
-    assert rows[0]["points"] == [("2026-10-02", 707.117), ("2026-10-09", 698.56)]
+    assert [r["name"] for r in rows] == ["Crude oil stocks incl. SPR", "Crude oil stocks excl. SPR", "Gasoline stocks"]
+    assert rows[1]["points"] == [("2026-10-02", 424.134), ("2026-10-09", 415.577)] and rows[1]["code"] == "WCESTUS1"
+
+
+def test_parse_eia_history():
+    html = ("<tr><td class='B6'>&nbsp;&nbsp;1982-Aug</td><td class='B5'>&nbsp;</td><td class='B3'>&nbsp;&nbsp;&nbsp;</td>"
+            "<td class='B5'>08/20&nbsp;</td><td class='B3'>338,764&nbsp;&nbsp;&nbsp;</td><td class='B5'>08/27&nbsp;</td>"
+            "<td class='B3'>336,138&nbsp;&nbsp;&nbsp;</td></tr>")
+    assert datahub.parse_eia_history(html, 0.001) == [("1982-08-20", 338.764), ("1982-08-27", 336.138)]
 
 
 def test_hub_store_scan_and_csv(client):

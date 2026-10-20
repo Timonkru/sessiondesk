@@ -226,3 +226,11 @@ table.grid caption { caption-side: top; text-align: right; height: 0; overflow: 
 table.grid caption .csvbtn { position: relative; top: -2px; background: none; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; opacity: 0; padding: 0 2px; }
 table.grid:hover caption .csvbtn, table.grid caption .csvbtn:focus { opacity: 1; }
 table.grid caption .csvbtn:hover { color: var(--link); }
+/* multi-series chart (data hub compare): six colors that read on dark and light */
+.chart-svg .mline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.mline.c0, .sw.c0 { stroke: #4c8dff; background: #4c8dff; } .mline.c1, .sw.c1 { stroke: #e8a33d; background: #e8a33d; }
+.mline.c2, .sw.c2 { stroke: #3fb67a; background: #3fb67a; } .mline.c3, .sw.c3 { stroke: #d65db1; background: #d65db1; }
+.mline.c4, .sw.c4 { stroke: #8f7ae5; background: #8f7ae5; } .mline.c5, .sw.c5 { stroke: #e5534b; background: #e5534b; }
+.chart .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 4px; }
+.chart .legend .sw { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; }
+.tabs.inline { display: inline-flex; border-bottom: 0; margin: 0 14px 0 0; gap: 10px; }

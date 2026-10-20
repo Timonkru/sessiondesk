@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import statistics
 import time
 
@@ -23,9 +24,14 @@ from ..connectors.base import stable_id
 Z_WARN = 3.0
 MIN_HISTORY = 40
 EIA_URL = "https://ir.eia.gov/wpsr/table4.csv"
-EIA_ROWS = {"Crude Oil": "Crude oil stocks excl. SPR", "Total Motor Gasoline": "Gasoline stocks",
-            "Distillate Fuel Oil": "Distillate stocks", "Kerosene-Type Jet Fuel": "Jet fuel stocks",
-            "Propane/Propylene": "Propane stocks", "SPR": "Strategic petroleum reserve"}
+# table4 row -> (series name, EIA history code). "Crude Oil" in table4 is the total INCLUDING the SPR;
+# commercial stocks are the row "Commercial (Excluding SPR)".
+EIA_ROWS = {"Commercial (Excluding SPR)": ("Crude oil stocks excl. SPR", "WCESTUS1"),
+            "Crude Oil": ("Crude oil stocks incl. SPR", "WCRSTUS1"), "Cushing": ("Cushing crude stocks", "W_EPC0_SAX_YCUOK_MBBL"),
+            "SPR": ("Strategic petroleum reserve", "WCSSTUS1"), "Total Motor Gasoline": ("Gasoline stocks", "WGTSTUS1"),
+            "Distillate Fuel Oil": ("Distillate stocks", "WDISTUS1"), "Kerosene-Type Jet Fuel": ("Jet fuel stocks", "WKJSTUS1"),
+            "Propane/Propylene": ("Propane stocks", "WPRSTUS1")}
+EIA_HISTORY_URL = "https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s={code}&f=W"
 NEWS_THEMES = ["fed", "ecb", "boj", "us_macro", "yields", "tariffs", "geopolitics", "oil", "gold", "crypto", "china", "tech", "risk"]
 RATES = {"^IRX", "^FVX", "^TNX", "^TYX"}
 
@@ -135,15 +141,49 @@ def parse_eia_table(text: str) -> list[dict]:
 
     def day(s):
         return dt.datetime.strptime(s.strip(), "%m/%d/%y").strftime("%Y-%m-%d")
-    out = []
+    out, seen = [], set()
     for r in rows[1:]:
-        if len(r) < 3 or r[0].strip() not in EIA_ROWS:
+        key = r[0].strip() if r else ""
+        if len(r) < 3 or key not in EIA_ROWS or key in seen:
             continue
+        seen.add(key)
+        name, code = EIA_ROWS[key]
         try:
-            out.append({"name": EIA_ROWS[r[0].strip()], "points": [(day(head[2]), float(r[2])), (day(head[1]), float(r[1]))]})
+            out.append({"name": name, "code": code, "points": [(day(head[2]), float(r[2])), (day(head[1]), float(r[1]))]})
         except ValueError:
             continue
     return out
+
+
+def parse_eia_history(html: str, scale: float = 1.0) -> list[tuple[str, float]]:
+    """EIA's weekly history page (one row per month, up to five 'MM/DD | value' pairs) -> [(day, value * scale)] (pure, tested)."""
+    out = []
+    for year, body in re.findall(r"<td class='B6'>(?:&nbsp;)*(\d{4})-\w+</td>(.*?)</tr>", html, re.S):
+        cells = re.findall(r"<td class='B[35]'>([^<]*)</td>", body)
+        for d, v in zip(cells[0::2], cells[1::2]):
+            d = d.replace("&nbsp;", "").strip()
+            v = v.replace("&nbsp;", "").replace(",", "").strip()
+            try:
+                out.append((f"{year}-{d[:2]}-{d[3:5]}", round(float(v) * scale, 6)))
+            except ValueError:
+                continue
+    return out
+
+
+async def _backfill(ctx, series_id: str, url: str, scale: float) -> None:
+    """Load the full weekly history once, when a series has only the few weeks collected so far."""
+    if len(await ctx.db.run(ctx.db.observations, series_id, 60)) >= 50:
+        return
+    try:
+        resp = await ctx.http.get(url, headers={"User-Agent": "SessionDesk"}, timeout=60, follow_redirects=True)
+    except Exception:                               # history is a bonus; the weekly table still updates
+        return
+    if resp.status_code == 200:
+        pts = parse_eia_history(resp.text, scale)
+        if pts:
+            meta = next((s for s in await ctx.db.run(ctx.db.series_list) if s["id"] == series_id), None)
+            if meta:
+                await ctx.db.run(ctx.db.upsert_series, meta, pts)
 
 
 async def collect_eia(ctx) -> int:
@@ -152,12 +192,20 @@ async def collect_eia(ctx) -> int:
         return 0
     rows = parse_eia_table(resp.text)
     for r in rows:
-        await ctx.db.run(ctx.db.upsert_series, _meta("eia:" + r["name"].lower().replace(" ", "_").replace(".", ""), r["name"] + " (mn bbl)",
-                                                     "Oil (EIA weekly)", "EIA Weekly Petroleum Status Report", "level"), r["points"])
+        sid = "eia:" + r["name"].lower().replace(" ", "_").replace(".", "")
+        if r["code"] == "WCESTUS1":                 # before 2026-10-20 this id held the total incl. SPR by mistake
+            old = await ctx.db.run(ctx.db.observations, sid, 10)
+            if any(v > 600 for _, v in old):
+                await ctx.db.run(ctx.db.delete_series, sid)
+        await ctx.db.run(ctx.db.upsert_series, _meta(sid, r["name"] + " (mn bbl)", "Oil (EIA weekly)",
+                                                     "EIA Weekly Petroleum Status Report", "level"), r["points"])
+        await _backfill(ctx, sid, EIA_HISTORY_URL.format(code=r["code"]), 0.001)     # history is in thousand barrels
     return len(rows)
 
 
 EIA_GAS_URL = "https://ir.eia.gov/ngs/wngsr.csv"
+EIA_GAS_HISTORY = {"East": "R31", "Midwest": "R32", "South Central": "R33", "Mountain": "R34", "Pacific": "R35", "Lower 48 total": "R48"}
+EIA_GAS_HISTORY_URL = "https://www.eia.gov/dnav/ng/hist/nw2_epg0_swo_{code}_bcfw.htm"
 
 
 def parse_eia_gas(text: str) -> list[dict]:
@@ -199,6 +247,8 @@ async def collect_eia_gas(ctx) -> int:
         sid = "eiagas:" + r["region"].lower().replace(" ", "_")
         await ctx.db.run(ctx.db.upsert_series, _meta(sid, f"US gas storage {r['region']} (Bcf)", "Gas (EIA weekly)",
                                                      "EIA Weekly Natural Gas Storage Report", "level"), r["points"])
+        if r["region"] in EIA_GAS_HISTORY:
+            await _backfill(ctx, sid, EIA_GAS_HISTORY_URL.format(code=EIA_GAS_HISTORY[r["region"]].lower()), 1.0)
         if r.get("avg5") is not None:
             await ctx.db.run(ctx.db.upsert_series, _meta(sid + ":vs5y", f"US gas storage {r['region']} vs 5-year average (Bcf)",
                                                          "Gas (EIA weekly)", "EIA Weekly Natural Gas Storage Report", "level"),

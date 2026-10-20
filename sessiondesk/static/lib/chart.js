@@ -164,3 +164,45 @@ export function candleChart(rawBars, { height = 300, fmtY = (v) => v.toFixed(2),
   root.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; });
   return wrap;
 }
+
+// Several series on one date axis, each in its own color: xs = dates, lines = [{ label, values }] aligned with xs
+// (null = no value). Hover shows every series at that date.
+export function multiChart(xs, lines, { height = 280, fmtY = (v) => v.toFixed(2) } = {}) {
+  const wrap = h("div", { class: "chart" });
+  const all = lines.flatMap((l) => l.values.filter((v) => v != null && Number.isFinite(v)));
+  if (xs.length < 2 || !all.length) { wrap.appendChild(h("p", { class: "muted" }, "Not enough data for a chart.")); return wrap; }
+  const W = 1000, H = height, padL = 8, padR = 64, padT = 10, padB = 22;
+  let min = Math.min(...all), max = Math.max(...all);
+  const pad = (max - min) * 0.06 || Math.abs(max) * 0.01 || 1;
+  min -= pad; max += pad;
+  const X = (i) => padL + (i / (xs.length - 1)) * (W - padL - padR);
+  const Y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", class: "chart-svg" });
+  for (let k = 0; k <= 4; k++) {
+    const v = min + ((max - min) * k) / 4, y = Y(v);
+    root.appendChild(svg("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "gridline" }));
+    root.appendChild(svg("text", { x: W - padR + 6, y: y + 4, class: "axis" }, axisText(fmtY(v))));
+  }
+  for (let k = 0; k < 5; k++) {
+    const i = Math.round((k / 4) * (xs.length - 1));
+    root.appendChild(svg("text", { x: X(i), y: H - 4, class: "axis", "text-anchor": k === 0 ? "start" : k === 4 ? "end" : "middle" }, xs[i]));
+  }
+  lines.forEach((l, j) => {
+    const d = l.values.map((v, i) => (v == null ? "" : (i && l.values[i - 1] != null ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1))).join(" ");
+    if (d.trim()) root.appendChild(svg("path", { d, class: `mline c${j % 6}` }));
+  });
+  const cross = svg("line", { y1: padT, y2: H - padB, class: "cross", visibility: "hidden" });
+  root.appendChild(cross);
+  const tip = h("div", { class: "chart-tip", hidden: true });
+  wrap.append(h("div", { class: "legend small" }, lines.map((l, j) => h("span", null, h("i", { class: `sw c${j % 6}` }), l.label))), root, tip);
+  root.addEventListener("mousemove", (e) => {
+    const r = root.getBoundingClientRect();
+    const i = Math.max(0, Math.min(xs.length - 1, Math.round(((((e.clientX - r.left) / r.width) * W - padL) / (W - padL - padR)) * (xs.length - 1))));
+    cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i)); cross.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    tip.textContent = [xs[i], ...lines.map((l) => `${l.label}: ${l.values[i] == null ? "–" : fmtY(l.values[i])}`)].join("\n");
+    tip.style.left = Math.min(r.width - 220, Math.max(0, ((X(i) / W) * r.width) - 110)) + "px";
+  });
+  root.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; });
+  return wrap;
+}
