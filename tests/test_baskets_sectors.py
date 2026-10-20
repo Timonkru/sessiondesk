@@ -85,3 +85,14 @@ def test_basket_delete_removes_hub_series(client):
     ctx.db.upsert_series({"id": "basket:" + b["id"], "name": "Gone", "category": "Your baskets", "source": "s", "kind": "price"}, [("2026-01-02", 100.0)])
     client.delete(f"/api/baskets/{b['id']}")
     assert all(s["id"] != "basket:" + b["id"] for s in ctx.db.series_list())
+
+
+def test_canonical_sector_and_drilldown_errors(client):
+    cs = sectors.canonical_sector
+    assert cs("Automotive") == "discretionary" and cs("Support services") == "industrials" and cs("Energy technology") == "industrials"
+    assert cs("Electrical utilities & independent power producers") == "utilities" and cs("Real Estate Investment Trusts") == "real_estate"
+    assert cs("Consumer Defensive") == "staples" and cs("Information Technology") == "technology" and cs("Mining") == "materials"
+    assert cs(None) is None
+    from sessiondesk.features import universe
+    assert all(cs(m.get("sector"), m.get("industry")) for u in universe.UNIVERSES for m in universe.members(u))   # nothing unmapped
+    assert "error" in client.get("/api/sectors/us/NOPE").json()

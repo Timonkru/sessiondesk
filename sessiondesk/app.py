@@ -339,7 +339,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         async def build():
             res = await ctx.hub.first("earnings", "earnings", dt.date.today(), days)
             return {"items": res.get("data", []), "source": res.get("source"), "error_detail": res.get("error")}
-        return await ctx.cache.get(f"earnings:{days}:{dt.date.today()}", 3 * 3600, build, disk=True)
+        from .features import timeline
+        data = await ctx.cache.get(f"earnings:{days}:{dt.date.today()}", 3 * 3600, build, disk=True)
+        watch, major = {s.upper() for s in (ctx.settings.get("watchlist") or [])}, timeline.major_symbols()
+        # importance is ranked after the cache, so a watchlist change shows at once
+        return {**data, "items": [{**r, **timeline.earnings_rank(r, watch, major)} for r in data.get("items") or []]}
 
     @app.get("/api/timeline")
     async def get_timeline(days: int = 7):
@@ -483,6 +487,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def get_commodities():
         from .features import commodities
         return await commodities.board(C())
+
+    @app.get("/api/sectors/{region}/{etf}")
+    async def get_sector_members(region: str, etf: str):
+        from .features import sectors
+        return await sectors.drilldown(C(), region, etf)
 
     @app.get("/api/sectors/{region}")
     async def get_sectors(region: str):

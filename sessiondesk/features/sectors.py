@@ -58,3 +58,85 @@ async def performance(ctx, region: str) -> dict:
         return {"region": region, "name": spec["name"], "benchmark": {"symbol": spec["benchmark"][0], "name": spec["benchmark"][1], **bench},
                 "rows": rows, "asof": time.time()}
     return await ctx.cache.get(f"sectors:{region}", 900, build)
+
+
+# ------------------------------------------------------------------ drill-down: the stocks inside a sector
+# The bundled index files name sectors differently (GICS, ICB, free text such as "Automotive" or "Support services").
+# They are folded into eleven broad sectors; the first matching rule wins, so specific words come first.
+CANONICAL_RULES = [
+    ("real_estate", ("real estate",)),
+    ("utilities", ("utilit", "power producers")),
+    ("industrials", ("energy technology", "aerospace", "defence", "defense", "industrial", "mechanical", "logistics",
+                     "support services", "distribution", "electrical", "engineering", "construction & materials")),
+    ("materials", ("materials", "chemicals", "mining", "construction materials", "basic resources")),
+    ("health", ("health", "pharma", "biotech", "medical")),
+    ("communication", ("communication", "telecom", "media")),
+    ("discretionary", ("discretionary", "cyclical", "consumer services", "automotive", "apparel", "travel", "leisure",
+                       "general retailers", "retailers", "retail hospitality", "personal goods", "household goods",
+                       "homebuilding", "e-commerce")),
+    ("staples", ("staples", "defensive", "consumer goods", "beverages", "food", "tobacco")),
+    ("financials", ("financial", "bank", "insurance", "investment trust", "collective investments")),
+    ("technology", ("technology", "software", "electronic", "semiconductor")),
+    ("energy", ("energy", "oil & gas", "oil and gas")),
+]
+SECTOR_OF_ETF = {
+    "XLK": "technology", "XLC": "communication", "XLY": "discretionary", "XLF": "financials", "XLV": "health",
+    "XLI": "industrials", "XLE": "energy", "XLB": "materials", "XLP": "staples", "XLU": "utilities", "XLRE": "real_estate",
+    "EXV1.DE": "financials", "EXH5.DE": "financials", "EXH2.DE": "financials", "EXV3.DE": "technology", "EXV4.DE": "health",
+    "EXH1.DE": "energy", "EXV6.DE": "materials", "EXV7.DE": "materials", "EXH4.DE": "industrials", "EXV8.DE": "materials",
+    "EXV5.DE": "discretionary", "EXH3.DE": "staples", "EXH7.DE": "staples", "EXH8.DE": "discretionary",
+    "EXV9.DE": "discretionary", "EXH6.DE": "communication", "EXV2.DE": "communication", "EXH9.DE": "utilities",
+    "EXI5.DE": "real_estate",
+}
+REGION_UNIVERSES = {"us": ["sp500"], "eu": ["stoxx50", "dax40", "cac40", "ftse100", "smi"]}
+
+
+def canonical_sector(sector: str | None, industry: str | None = None) -> str | None:
+    """Broad sector key for a member's sector text (pure, tested)."""
+    text = f"{sector or ''} | {industry or ''}".lower()
+    for key, words in CANONICAL_RULES:
+        if any(w in (sector or "").lower() for w in words):
+            return key
+    for key, words in CANONICAL_RULES:                 # sector text unknown: try the industry
+        if any(w in text for w in words):
+            return key
+    return None
+
+
+async def drilldown(ctx, region: str, etf: str) -> dict:
+    """Members of one sector with their moves, from the same cached member closes the screener and indices use."""
+    from . import universe
+    from .indices import member_closes
+    from .screener import metrics
+    spec = REGIONS.get(region)
+    target = SECTOR_OF_ETF.get(etf)
+    if not spec or not target or etf not in [s for s, _ in spec["sectors"]]:
+        return {"error": "unknown sector"}
+    rows: dict[str, dict] = {}
+    for key in REGION_UNIVERSES[region]:
+        data = await member_closes(ctx, key)
+        if "error" in data:
+            continue
+        for m in universe.members(key):
+            if canonical_sector(m.get("sector"), m.get("industry")) != target:
+                continue
+            if m["symbol"] in rows:
+                rows[m["symbol"]]["indices"].append(universe.UNIVERSES[key])
+                continue
+            met = metrics(data["closes"].get(m["symbol"]) or [])
+            if not met:
+                continue
+            prof = ctx.cache.peek(f"profile:v2:{m['symbol']}", disk=True) or {}
+            rows[m["symbol"]] = {"symbol": m["symbol"], "name": m.get("name") or "", "sub": m.get("industry") or m.get("sector") or "",
+                                 "indices": [universe.UNIVERSES[key]], **met,
+                                 "market_cap": prof.get("market_cap") if "error" not in prof else None}
+    out = sorted(rows.values(), key=lambda r: -(r.get("chg1d") or -1e9))
+    perf = await performance(ctx, region)
+    etf_row = next((r for r in perf.get("rows", []) if r["symbol"] == etf), None)
+    ups = [r for r in out if (r.get("chg1d") or 0) > 0]
+    return {"region": region, "etf": etf, "sector": etf_row["name"] if etf_row else etf, "group": target, "etf_row": etf_row,
+            "benchmark": perf.get("benchmark"), "rows": out, "n": len(out), "up_share_1d": len(ups) / len(out) if out else None,
+            "note": ("Members of the S&P 500 in this GICS sector. " if region == "us" else
+                     "Members of Euro Stoxx 50, DAX, CAC 40, FTSE 100 and SMI, grouped into eleven broad sectors - the STOXX "
+                     "sector ETFs are finer (e.g. Banks, Insurance and Financial services all show the financials here). ")
+                    + "Moves from one year of daily closes, today's value live."}
