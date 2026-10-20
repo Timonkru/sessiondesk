@@ -82,7 +82,7 @@ export async function render(root, _params, ctx) {
 
   const loadChanges = async () => {
     const a = await api("/api/activity?limit=40", { fresh: true });
-    const icon = { position: "◆", level: "↕", price: "◎", move: "▲", release: "■", event: "◷", job: "⚙", note: "✎", briefing: "✦" };
+    const icon = { position: "◆", level: "↕", price: "◎", hub: "◬", move: "▲", release: "■", event: "◷", job: "⚙", note: "✎", briefing: "✦" };
     clear(changes, section("Changes", (a.items || []).length ? h("ul", { class: "feed" }, a.items.map((x) => h("li", null,
       h("div", { class: "t" }, h("span", { class: "muted" }, (icon[x.kind] || "·") + " "), x.title),
       h("div", { class: "m" }, `${stamp(x.ts)} · ${x.kind}`, x.body ? ` · ${x.body.slice(0, 160)}` : "")))) : note("Nothing logged yet.")));

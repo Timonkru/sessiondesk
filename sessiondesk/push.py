@@ -19,6 +19,7 @@ EVENTS = {   # key: (label, on by default)
     "release": ("Released values (actual vs forecast)", True),
     "position": ("Positions opened or closed (also during quiet hours)", True),
     "price_alert": ("Your price alerts", True),
+    "hub_warning": ("Data hub early warnings (a series moves unusually against its own history)", True),
     "level": ("Level crossings", False),
     "alert": ("Unusual moves (watchlist + index scan)", False),
     "job_failed": ("Failed jobs", True),
@@ -73,6 +74,10 @@ def format_event(event: dict, cfg: dict) -> dict | None:
         no_stop = "NO STOP" in (event.get("title") or "")
         return {"key": f"pos:{event.get('id')}", "kind": "position", "priority": 5 if no_stop else 3,
                 "title": event.get("title", "Position change"), "body": f"{p.get('symbol', '')} {p.get('side', '')}".strip()}
+    if kind == "hub_warning" and on.get("hub_warning"):
+        a = event.get("alert") or {}
+        return {"key": f"hub:{a.get('id')}", "kind": "hub_warning", "priority": 3, "title": a.get("title", "Unusual move"),
+                "body": (a.get("body") or "")[:300]}
     if kind == "price_alert" and on.get("price_alert"):
         a = event.get("alert") or {}
         return {"key": f"price:{a.get('id')}:{(a.get('data') or {}).get('triggered')}", "kind": "price_alert", "priority": 4,

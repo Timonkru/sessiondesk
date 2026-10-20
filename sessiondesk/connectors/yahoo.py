@@ -94,6 +94,22 @@ class Yahoo(Connector):
                     out[sym] = [float(c) for c in closes]
         return out
 
+    async def daily_series(self, symbols: list[str], range_: str = "2y") -> dict[str, list[tuple[str, float]]]:
+        """{symbol: [(YYYY-MM-DD, close)]} - dated daily closes (spark, 20 per call), for the data hub."""
+        import datetime as _dt
+        chunks = [symbols[i:i + 20] for i in range(0, len(symbols), 20)]
+        results = await asyncio.gather(*(self._spark(c, range_, "1d") for c in chunks), return_exceptions=True)
+        out = {}
+        for res in results:
+            if isinstance(res, Exception):
+                continue
+            for sym, d in res.items():
+                pts = [(_dt.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d"), float(c))
+                       for t, c in zip(d.get("timestamp") or [], d.get("close") or []) if t and _num(c) is not None]
+                if pts:
+                    out[sym] = list(dict(pts).items())             # one value per day (the latest wins)
+        return out
+
     # ------------------------------------------------------------ history
     async def history(self, symbol: str, range_: str = "1y", interval: str | None = None) -> dict:
         if range_.endswith("-d"):                      # "10y-d" = daily bars over the whole range (statistics)

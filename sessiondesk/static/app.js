@@ -23,6 +23,7 @@ const VIEWS = {
   ext: () => import("./views/ext.js"),
   system: () => import("./views/system.js"),
   screener: () => import("./views/screener.js"),
+  hub: () => import("./views/datahub.js"),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -229,6 +230,10 @@ function wirePush() {
     const kind = alert.data && alert.data.pct > 0 ? "up" : "down";
     toast(alert.title, (alert.body || "").split(". ").slice(0, 2).join(". ").slice(0, 160), { kind, onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });
     notify("Unusual move: " + alert.title, (alert.body || "").slice(0, 180));
+  });
+  on("hub_warning", ({ alert }) => {
+    toast(alert.title, alert.body, { kind: "high", onClick: () => ctx.go("#/hub/" + encodeURIComponent(alert.symbol)) });
+    notify(alert.title, alert.body);
   });
   on("price_alert", ({ alert }) => {
     toast("Price alert: " + alert.title, alert.body, { kind: "high", onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });

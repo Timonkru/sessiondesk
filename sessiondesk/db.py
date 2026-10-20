@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS briefings (
 CREATE TABLE IF NOT EXISTS journal (
   account TEXT, position_id TEXT, symbol TEXT, side TEXT, magic TEXT, opened REAL, closed REAL, net REAL,
   risk_observed REAL, risk_confirmed REAL, note TEXT, context TEXT, PRIMARY KEY (account, position_id));
+CREATE TABLE IF NOT EXISTS series (
+  id TEXT PRIMARY KEY, name TEXT, category TEXT, source TEXT, kind TEXT, unit TEXT, updated REAL);
+CREATE TABLE IF NOT EXISTS obs (
+  series TEXT, day TEXT, value REAL, PRIMARY KEY (series, day));
 CREATE TABLE IF NOT EXISTS ai_usage (
   ts REAL, day TEXT, task TEXT, provider TEXT, model TEXT, tok_in INTEGER, tok_out INTEGER, cost REAL);
 """
@@ -128,6 +132,33 @@ class DB:
             r["tags"] = json.loads(r.get("tags") or "[]")
             r["group"] = r.pop("grp")
         return rows
+
+    # ------------------------------------------------------------ data hub (series + daily observations)
+    def upsert_series(self, meta: dict, points: list[tuple[str, float]]) -> None:
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO series VALUES (?,?,?,?,?,?,?)",
+                               (meta["id"], meta["name"], meta.get("category"), meta.get("source"), meta.get("kind"),
+                                meta.get("unit"), time.time()))
+            self._conn.executemany("INSERT OR REPLACE INTO obs VALUES (?,?,?)", [(meta["id"], d, v) for d, v in points])
+            self._conn.commit()
+
+    def series_list(self) -> list[dict]:
+        return self._exec("SELECT s.*, (SELECT COUNT(*) FROM obs o WHERE o.series = s.id) AS n FROM series s ORDER BY category, name")
+
+    def observations(self, series_id: str, limit: int = 400) -> list[tuple[str, float]]:
+        rows = self._exec("SELECT day, value FROM obs WHERE series = ? ORDER BY day DESC LIMIT ?", (series_id, limit))
+        return [(r["day"], r["value"]) for r in reversed(rows)]
+
+    def news_counts(self, themes: dict, since: int) -> dict[str, dict[str, int]]:
+        """{theme: {YYYY-MM-DD: headlines}} from the archive, matched by the theme regexes."""
+        rows = self._exec("SELECT title, published FROM news WHERE published >= ?", (since,))
+        out: dict[str, dict[str, int]] = {t: {} for t in themes}
+        for r in rows:
+            day = time.strftime("%Y-%m-%d", time.gmtime(r["published"] or 0))
+            for t, rx in themes.items():
+                if rx.search(r["title"] or ""):
+                    out[t][day] = out[t].get(day, 0) + 1
+        return out
 
     def count_news(self) -> int:
         try:

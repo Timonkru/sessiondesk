@@ -418,6 +418,35 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return res
 
     # ------------------------------------------------------------------ index universes (one list for movers scan, screener, indices)
+    # ------------------------------------------------------------------ data hub (series history + early warnings)
+    @app.get("/api/hub")
+    async def get_hub():
+        from .features import datahub
+        return await datahub.overview(C())
+
+    @app.get("/api/hub/series/{series_id}")
+    async def get_hub_series(series_id: str, limit: int = 2600):
+        ctx = C()
+        meta = next((s for s in await ctx.db.run(ctx.db.series_list) if s["id"] == series_id), None)
+        if not meta:
+            return {"error": "unknown series"}
+        return {"meta": meta, "points": await ctx.db.run(ctx.db.observations, series_id, min(limit, 10000))}
+
+    @app.get("/api/hub/csv/{series_id}")
+    async def get_hub_csv(series_id: str):
+        ctx = C()
+        pts = await ctx.db.run(ctx.db.observations, series_id, 100000)
+        body = "date,value\n" + "".join(f"{d},{v}\n" for d, v in pts)
+        safe = "".join(c if c.isalnum() else "_" for c in series_id)
+        return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{safe}.csv"'})
+
+    @app.post("/api/hub/collect")
+    async def post_hub_collect():
+        from .features import datahub
+        ctx = C()
+        done = {name: await fn(ctx) for name, (fn, _) in datahub.COLLECTORS.items()}
+        return {"collected": done, "warnings": len(await datahub.scan(ctx))}
+
     @app.get("/api/universes")
     async def get_universes():
         from .features import universe
@@ -723,7 +752,7 @@ async def run_briefing(ctx, kind: str) -> dict:
 
 
 ACTIVITY_KINDS = {"alert": "move", "level": "level", "release": "release", "release_headline": "release", "event_warning": "event",
-                  "price_alert": "price"}
+                  "price_alert": "price", "hub_warning": "hub"}
 
 
 def record_activity(ctx):
@@ -747,6 +776,9 @@ def record_activity(ctx):
             if j.get("status") not in ("ok", "failed"):
                 return
             title, body = f"job {j.get('name')}: {j.get('status')}", j.get("issue") or ""
+        elif kind == "hub_warning":
+            a = ev.get("alert") or {}
+            title, body = a.get("title", ""), a.get("body", "")
         elif kind == "price_alert":
             a = ev.get("alert") or {}
             title, body = "price alert: " + a.get("title", ""), a.get("body", "")
@@ -798,6 +830,15 @@ def background(ctx) -> list:
 
     async def price_alert_check():
         await pricealerts.run_check(ctx)
+
+    def hub_loop(name):
+        async def run():
+            from .features import datahub
+            fn, _ = datahub.COLLECTORS[name]
+            await fn(ctx)
+            await datahub.scan(ctx)
+        run.__name__ = f"hub_{name}"
+        return run
 
     async def warm_news():
         # First pass fills the archive silently (no notification storm after a restart).
@@ -920,6 +961,10 @@ def background(ctx) -> list:
         every(lambda: 3600, warm_indices, first_delay=180, name="indices"),
         every(lambda: 60, scheduled_briefing, first_delay=90, name="briefing"),
         every(lambda: 15, price_alert_check, first_delay=30, name="price alerts"),
+        every(lambda: 900, hub_loop("markets"), first_delay=120, name="hub markets"),
+        every(lambda: 6 * 3600, hub_loop("fred"), first_delay=200, name="hub fred"),
+        every(lambda: 6 * 3600, hub_loop("eia"), first_delay=240, name="hub eia"),
+        every(lambda: 3600, hub_loop("news"), first_delay=150, name="hub news"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
         ctx.extras["push"].run(),
