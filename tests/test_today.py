@@ -118,3 +118,21 @@ def test_timeline_earnings_filter_and_endpoint(client):
     assert all(x["day"] for x in d["items"])
     days = [x["day"] for x in d["items"]]
     assert days == sorted(days)
+
+
+def test_earnings_rank_and_endpoint(client):
+    from sessiondesk.features import timeline
+    rank = lambda r: timeline.earnings_rank(r, {"MINE"}, {"IDX"})            # noqa: E731
+    assert rank({"symbol": "MINE", "market_cap": None}) == {"cap": None, "importance": "high", "why": "watchlist"}
+    assert rank({"symbol": "MEGA", "market_cap": "$250,000,000,000"}) == {"cap": 250e9, "importance": "high", "why": "mega cap"}
+    assert rank({"symbol": "IDX", "market_cap": "$12,000,000,000"}) == {"cap": 12e9, "importance": "medium", "why": "index member"}
+    assert rank({"symbol": "BIG", "market_cap": "$60,000,000,000"})["why"] == "large cap"
+    assert rank({"symbol": "TINY", "market_cap": "$900,000,000"}) == {"cap": 9e8, "importance": "low", "why": None}
+
+    async def first(capability, method, *args):
+        return {"data": [{"symbol": "AAPL", "date": "2026-10-29", "market_cap": "$3,500,000,000,000"},
+                         {"symbol": "TINY", "date": "2026-10-29", "market_cap": "$900,000,000"}], "source": "stub"}
+    client.app_state["ctx"].hub.first = first
+    items = {r["symbol"]: r for r in client.get("/api/earnings?days=3").json()["items"]}
+    assert items["AAPL"]["importance"] == "high" and items["AAPL"]["cap"] == 3.5e12
+    assert items["TINY"]["importance"] == "low"

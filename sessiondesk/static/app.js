@@ -182,6 +182,29 @@ async function sendAI(question, mode = "ask") {
 }
 export { sendAI };
 
+// ------------------------------------------------------------------ world clock
+// Local time in the two cash-market centres, with the exchange's regular session (local time, Mon-Fri).
+// Exchange holidays and half days are not known here; the dot only says "inside the regular hours".
+const CLOCKS = [
+  { label: "New York", short: "NY", tz: "America/New_York", exchange: "NYSE", open: 9 * 60 + 30, close: 16 * 60 },
+  { label: "London", short: "LDN", tz: "Europe/London", exchange: "LSE", open: 8 * 60, close: 16 * 60 + 30 },
+];
+const clockFmt = new Map(CLOCKS.map((c) => [c.tz, new Intl.DateTimeFormat("en-GB", { timeZone: c.tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })]));
+function tickClocks() {
+  const el = $("worldClock");
+  const now = new Date();
+  const hm = (m) => `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+  clear(el, CLOCKS.map((c) => {
+    const p = Object.fromEntries(clockFmt.get(c.tz).formatToParts(now).map((x) => [x.type, x.value]));
+    const mins = Number(p.hour) * 60 + Number(p.minute), weekday = !["Sat", "Sun"].includes(p.weekday);
+    const open = weekday && mins >= c.open && mins < c.close;
+    const state = !weekday ? "closed (weekend)" : open ? `open, closes in ${hm(c.close - mins)}`
+      : mins < c.open ? `closed, opens in ${hm(c.open - mins)}` : "closed for the day";
+    return h("span", { class: "wc" + (open ? " open" : ""), title: `${c.label} ${p.hour}:${p.minute} (${p.weekday}) · ${c.exchange} ${state}. Holidays are not taken into account.` },
+      h("span", { class: "dot" }, open ? "●" : "○"), ` ${c.short} ${p.hour}:${p.minute}`);
+  }));
+}
+
 // ------------------------------------------------------------------ event countdown + release bar
 let nextEvent = null;
 async function loadNextEvent() {
@@ -370,4 +393,6 @@ wirePush();
 route();
 loadNextEvent();
 setInterval(tickStrip, 1000);
+tickClocks();
+setInterval(tickClocks, 5000);
 setInterval(loadNextEvent, 5 * 60 * 1000);

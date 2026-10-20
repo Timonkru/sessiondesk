@@ -39,7 +39,8 @@ def earnings_rank(row: dict, watch: set[str], major: set[str]) -> dict:
     (>= 50 bn USD); low = the rest. why names the first reason that applies."""
     sym = (row.get("symbol") or "").upper()
     cap = _cap(row.get("market_cap"))
-    why = "watchlist" if sym in watch else "index member" if sym in major else "large cap" if cap and cap >= BIG_CAP else None
+    why = ("watchlist" if sym in watch else "index member" if sym in major else "mega cap" if cap and cap >= MEGA_CAP
+           else "large cap" if cap and cap >= BIG_CAP else None)
     level = ("high" if sym in watch or (cap and cap >= MEGA_CAP) else "medium" if why else "low")
     return {"cap": cap, "importance": level, "why": why}
 
