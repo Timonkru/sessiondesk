@@ -12,7 +12,9 @@ export async function render(root, _params, ctx) {
     const status = !d.configured
       ? note("Not connected yet. Get a free key at aisstream.io (sign in, API Keys) and enter it under Settings → Connectors → aisstream.io. Nothing else to install; the monitor starts within a minute.", "warn")
       : d.error ? note(`Connection problem: ${d.error} - retrying with backoff.`, "warn")
-      : note(d.connected_recently ? `Connected · ${num(d.received, 0)} messages received since start.` : "Connecting… (first ships appear within a minute; tanker types after a few minutes).");
+      : note(d.connected_recently ? `Connected · ${num(d.received, 0)} messages received since start · ${num(d.typed, 0)} of ${num(d.present, 0)} ships at the chokepoints have sent their type so far`
+          + (d.present && d.typed / d.present < 0.6 ? " - ships send their static data (incl. the type) only every few minutes, so tanker counts fill in over the first 10-20 minutes. Types are remembered across restarts." : ".")
+        : "Connecting… (first ships appear within a minute; tanker types after a few minutes).");
     const rows = d.chokepoints || [];
     clear(body, status,
       section("Chokepoints", h("div", { class: "scroll" }, table([

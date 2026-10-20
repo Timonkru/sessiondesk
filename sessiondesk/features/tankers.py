@@ -71,6 +71,7 @@ class TankerState:
             s["name"] = meta["ShipName"].strip()
         if kind == "ShipStaticData":
             s["type"] = body.get("Type")
+            s["typed"] = now
             s["destination"] = (body.get("Destination") or "").strip() or None
             s["draught"] = body.get("MaximumStaticDraught")
             s["imo"] = body.get("ImoNumber")
@@ -95,21 +96,31 @@ class TankerState:
             tankers = [s for s in here if is_tanker(s.get("type"))]
             slow = [s for s in tankers if (s.get("sog") or 0) < SLOW_KN]
             out.append({"key": key, "name": name, "flow": flow, "box": box, "vessels": len(here),
-                        "type_unknown": sum(1 for s in here if s.get("type") is None),
+                        "type_unknown": sum(1 for s in here if s.get("type") is None), "typed": sum(1 for s in here if s.get("type") is not None),
                         "tankers": len(tankers), "moving": len(tankers) - len(slow), "slow": len(slow),
                         "today": len(self.daily.get(day, {}).get(key, ())),
                         "ships": sorted(({k: s.get(k) for k in ("mmsi", "name", "sog", "destination", "draught", "imo")} for s in tankers),
                                         key=lambda x: x.get("name") or "")[:60]})
         return out
 
-    def dump(self) -> dict:
-        return {"daily": {d: {b: sorted(m) for b, m in v.items()} for d, v in self.daily.items()}}
+    def dump(self, max_ships: int = 20000) -> dict:
+        """Daily tanker sets plus every ship's static data seen so far: a ship's type never changes, so after a restart
+        it counts as a tanker at once instead of waiting minutes for its next static message."""
+        known = [s for s in self.ships.values() if s.get("type") is not None]
+        known.sort(key=lambda s: s.get("seen") or s.get("typed") or 0, reverse=True)
+        return {"daily": {d: {b: sorted(m) for b, m in v.items()} for d, v in self.daily.items()},
+                "ships": {str(s["mmsi"]): {k: s.get(k) for k in ("type", "name", "destination", "draught", "imo")} for s in known[:max_ships]}}
 
     def load(self, data: dict, keep_days: int = 3) -> None:
         days = sorted((data or {}).get("daily", {}))[-keep_days:]
         for d in days:
             for b, ms in data["daily"][d].items():
                 self.daily.setdefault(d, {}).setdefault(b, set()).update(ms)
+        for mmsi, info in ((data or {}).get("ships") or {}).items():
+            try:
+                self.ships.setdefault(int(mmsi), {"mmsi": int(mmsi)}).update({k: v for k, v in info.items() if v is not None})
+            except (TypeError, ValueError):
+                continue
 
 
 def _state(ctx) -> TankerState:
@@ -155,7 +166,7 @@ async def run(ctx) -> None:
                 await ws.send(subscription(conn.secret("api_key"), [box for _, _, box, _ in CHOKEPOINTS]))
                 ctx.extras["tankers_error"] = None
                 backoff = 30
-                last_flush = time.time()
+                last_flush = time.time() - 480              # first save after 2 minutes: learned ship types survive a restart
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)
@@ -190,7 +201,10 @@ async def view(ctx) -> dict:
     rows = st.snapshot()
     for r in rows:
         r["avg7"] = week.get(r["key"])
+    present = sum(r["vessels"] for r in rows)
+    typed = sum(r["typed"] for r in rows)
     return {"configured": bool(conn and conn.configured()), "active": bool(conn and conn.active()),
+            "present": present, "typed": typed, "known_types": sum(1 for s in st.ships.values() if s.get("type") is not None),
             "connected_recently": time.time() - st.last_message < 300, "received": st.received,
             "error": ctx.extras.get("tankers_error"), "chokepoints": rows,
             "note": "Live AIS via aisstream.io. Tankers = AIS ship type 80-89, known once a ship's static data arrived "

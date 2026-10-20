@@ -43,6 +43,9 @@ def test_counting_at_chokepoints():
     copy = tankers.TankerState()
     copy.load(json.loads(json.dumps(st.dump())))
     assert copy.daily == st.daily
+    assert copy.ships[1]["type"] == 84 and 4 not in copy.ships          # types survive a restart, untyped ships do not
+    copy.handle(pos(1, 26.5, 56.3), now + 8 * 3600)                     # after the restart: a tanker at its first position
+    assert next(r for r in copy.snapshot(now + 8 * 3600) if r["key"] == "hormuz")["tankers"] == 1
 
 
 def test_tanker_api_without_key(client):
