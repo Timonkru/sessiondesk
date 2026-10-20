@@ -234,3 +234,12 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .chart .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 4px; }
 .chart .legend .sw { display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; }
 .tabs.inline { display: inline-flex; border-bottom: 0; margin: 0 14px 0 0; gap: 10px; }
+/* network view: readable on dark and light - labels get a halo in the page color so edges never run through them,
+   edges are drawn stronger, and on narrow screens the graph scrolls sideways instead of shrinking the text */
+.netwrap { overflow-x: auto; }
+.netwrap .netgraph { min-width: 760px; }
+.netgraph text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+.netgraph .netcenter text { stroke: none; }
+.netgraph .netedge { stroke: var(--muted); stroke-opacity: .45; }
+.netgraph .netedge.strong { stroke-opacity: .8; }
+.netgraph .netnode circle { fill: var(--bg3); }

@@ -93,6 +93,7 @@ def test_journal_endpoint_hides_copier_trades(client):
     client.patch("/api/settings", json={"copy_magics": ["987654"]})
     d = client.get("/api/journal?days=7").json()
     assert [t["position_id"] for t in d["trades"]] == ["1"] and d["copies_hidden"] == 1
+    assert d["curves"]["A"]["total"] == 95.0              # the curve is the account's real P/L, copies included
     assert len(client.get("/api/journal?days=7&copies=true").json()["trades"]) == 2
 
 

@@ -121,7 +121,9 @@ async def view(ctx, days: int = 30, include_copies: bool = False) -> dict:
     st = stats(closed, names)
     for x in st:
         x["currency"] = currency.get(x["account"])
-    cv = curves(closed, days)
+    # The curve is the account's real P/L: copied trades are that account's own trades, so they always count there.
+    # Only the per-setup statistics hide them (the same decisions already count on the master account).
+    cv = curves(closed_all, days)
     for a, c in cv.items():
         c["currency"] = currency.get(a)
     hidden = len(closed_all) - len(closed)
@@ -130,4 +132,5 @@ async def view(ctx, days: int = 30, include_copies: bool = False) -> dict:
             "note": "R needs an initial risk: 'observed' = money to the stop when SessionDesk first saw the position (a proxy), "
                     "'confirmed' = entered by you. Averages with fewer than ~30 trades are anecdotal. Accounts are never added "
                     "together (they can hold different currencies)."
-                    + (f" {hidden} copied trades (copy_magics in Settings) are hidden so nothing counts twice." if hidden else "")}
+                    + (f" {hidden} copied trades (copy_magics in Settings) are left out of the trade list and setup statistics so "
+                       "nothing counts twice; the equity curves include them, because they are the copy account's real P/L." if hidden else "")}
