@@ -488,6 +488,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import commodities
         return await commodities.board(C())
 
+    @app.get("/api/tankers")
+    async def get_tankers():
+        from .features import tankers
+        return await tankers.view(C())
+
     @app.get("/api/sectors/{region}/{etf}")
     async def get_sector_members(region: str, etf: str):
         from .features import sectors
@@ -857,6 +862,13 @@ def market_hours(now: float | None = None) -> bool:
     return t.weekday() < 5 and 7 <= t.hour < 21          # Europe open .. US close (UTC), broad on purpose
 
 
+async def _tanker_loop(ctx):
+    """AIS websocket for the tanker monitor; idles until the user enters an aisstream.io key."""
+    from .features import tankers
+    await asyncio.sleep(30)
+    await tankers.run(ctx)
+
+
 def background(ctx) -> list:
     async def every(seconds_fn, fn, *, first_delay: float = 0.0, name: str = ""):
         stat = ctx.extras.setdefault("loops", {}).setdefault(name or fn.__name__, {
@@ -1029,4 +1041,5 @@ def background(ctx) -> list:
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),
         ctx.extras["push"].run(),
+        _tanker_loop(ctx),
     ]

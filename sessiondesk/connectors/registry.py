@@ -12,6 +12,9 @@ from .yahoo import Yahoo
 ALL = (Yahoo, Rss, FFCalendar, Fred, Cftc, Sec, NasdaqEarnings, MT5Bridge,
        Finnhub, FMP, Polygon, AlphaVantage, TradingEconomics, Alpaca) + PROVIDERS
 
+from .ais import AisStream  # noqa: E402  (websocket connector, own module)
+ALL = ALL + (AisStream,)
+
 PLANNED = [
     PlannedConnector("databento", "Databento", "paid", "data", ("history", "quotes"), "https://databento.com",
                      "Exchange-grade futures and equities data (CME, Eurex, Nasdaq TotalView): tick, depth, true futures volume."),

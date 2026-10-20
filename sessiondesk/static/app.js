@@ -27,6 +27,7 @@ const VIEWS = {
   sectors: () => import("./views/sectors.js"),
   baskets: () => import("./views/baskets.js"),
   commodities: () => import("./views/commodities.js"),
+  tankers: () => import("./views/tankers.js"),
 };
 
 const $ = (id) => document.getElementById(id);
