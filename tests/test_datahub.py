@@ -93,3 +93,133 @@ def test_power_daily_base_price():
     assert datahub.power_daily(unix, prices, utc) == [("2026-10-19", round((48 * 100 + 47 * 50) / 95, 2))]
     assert datahub.power_daily([], [], utc) == []
     assert "c=DE" in datahub.source_url("power:de-lu")
+
+
+def _flow(key_op, point, day, value):
+    import datetime as dt
+    end = (dt.date.fromisoformat(day) + dt.timedelta(days=1)).isoformat()
+    return {"operatorKey": key_op, "pointKey": point, "directionKey": "entry", "periodFrom": f"{day}T06:00:00+02:00",
+            "periodTo": f"{end}T06:00:00+02:00", "value": value}
+
+
+def test_entsog_daily_counts_only_complete_days():
+    rows = ([_flow("FR-TSO-0003", "ITP-00045", f"2026-10-{d:02d}", 500e6) for d in range(1, 21)]
+            + [_flow("BE-TSO-0001", "ITP-00106", f"2026-10-{d:02d}", "400000000") for d in range(1, 20)]   # day 20 not yet reported
+            + [_flow("DE-TSO-0009", "ITP-00525", f"2026-10-0{d}", 1e6) for d in range(1, 4)]           # silent since day 3: closed
+            + [_flow("DK-TSO-0001", "ITP-00630", "2026-10-05", "")])                                   # "not available" rows carry no value
+    groups = {"norway": ["fr-tso-0003itp-00045entry", "be-tso-0001itp-00106entry", "de-tso-0009itp-00525entry", "dk-tso-0001itp-00630entry"],
+              "nothing": ["xx-tso-0001itp-99999entry"]}
+    out = datahub.entsog_daily(rows, groups)
+    assert "nothing" not in out
+    pts = dict(out["norway"])
+    assert pts["2026-10-01"] == 901.0 and pts["2026-10-04"] == 900.0       # GWh/d; the closed point counts while it reported
+    assert "2026-10-20" not in pts and max(pts) == "2026-10-19"             # a late point keeps the newest day out
+    assert datahub.entsog_daily([], groups) == {}
+    import datetime as dt
+    running = dt.datetime(2026, 10, 20, 9, 30, tzinfo=dt.timezone.utc)                # gas day 19.10. ended 04:00 UTC on the 20th
+    partial = rows + [_flow("FR-TSO-0003", "ITP-00045", "2026-10-20", 20e6)]
+    assert max(dict(datahub.entsog_daily(partial, {"fr": groups["norway"][:1]}, now=running)["fr"])) == "2026-10-19"
+    assert datahub.sum_complete([[("a", 1.0), ("b", 2.0)], [("b", 3.0), ("c", 4.0)]]) == [("b", 5.0)]
+    assert datahub.sum_complete([[("a", 1.0)], []]) == []
+    groups = datahub.entsog_groups()
+    keys = [k for _, ks in groups.values() for k in ks]
+    assert len(keys) == len(set(keys)) and "lng_nl" in groups and "turkstream" in groups
+    assert "hu-tso-0001itp-10013entry" not in keys and "it-tso-0001itp-00008entry" not in keys   # no double count of TurkStream / TAP
+    assert datahub.source_url("entsog:total").startswith("https://transparency.entsog.eu")
+    assert datahub.source_url("agsi:de:full") == "https://agsi.gie.eu/data-overview/DE"
+    assert datahub.source_url("agsi:eu:injection") == "https://agsi.gie.eu/data-overview/eu"
+
+
+def test_collect_entsog_stores_routes_and_totals(client, monkeypatch):
+    import httpx
+    ctx = client.app_state["ctx"]
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        keys = request.url.params["pointDirection"].split(",")
+        rows = []
+        for k in keys:
+            op, point = k[:11].upper(), k[11:20].upper()
+            rows += [_flow(op, point, f"2026-10-{d:02d}", 10e6) for d in range(1, 11)]
+        return httpx.Response(200, json={"operationalData": rows})
+    ctx.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(datahub, "ENTSOG_PAUSE", 0)
+    n = asyncio.run(datahub.collect_entsog(ctx))
+    assert n == len(datahub.entsog_groups()) + 2
+    assert all(r.url.host == "transparency.entsog.eu" and r.url.params["indicator"] == "Physical Flow" for r in seen)
+    nl = ctx.db.observations("entsog:lng_nl", 50)
+    assert nl[-1] == ("2026-10-10", 20.0) and len(nl) == 10              # two terminals x 10 GWh/d
+    n_keys = sum(len(ks) for _, ks in datahub.entsog_groups().values())
+    assert ctx.db.observations("entsog:total", 50)[-1][1] == n_keys * 10.0
+    import datetime as dt
+    rnd = random.Random(3)
+    jump = [((dt.date(2026, 10, 10) - dt.timedelta(days=300 - i)).isoformat(), 100 + rnd.gauss(0, 2)) for i in range(301)]
+    jump.append(("2026-10-11", 500.0))
+    for sid in ("entsog:lng_lt", "entsog:lng_total"):
+        ctx.db.upsert_series({"id": sid, "name": sid, "category": datahub.ENTSOG_CATEGORY, "source": "t", "kind": "level"}, jump)
+    assert {w["symbol"] for w in asyncio.run(datahub.scan(ctx, publish=False))} >= {"entsog:lng_total"}
+    assert "entsog:lng_lt" not in {w["symbol"] for w in asyncio.run(datahub.scan(ctx, publish=False))}
+    assert [datahub.warns(x) for x in ("entsog:total", "entsog:tap", "agsi:de:full", "agsi:de:injection", "fred:DGS10")] ==         [True, False, True, False, True]
+    rows = {r["id"]: r for r in client.get("/api/commodities").json()["gas_flows"]}
+    assert list(rows)[0] == "entsog:total" and rows["entsog:turkstream"]["last"] == 10.0
+    hub = {s["id"]: s for s in client.get("/api/hub").json()["series"]}
+    assert hub["entsog:norway"]["url"].startswith("https://transparency.entsog.eu")
+
+    ctx.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(429)))
+    assert asyncio.run(datahub.collect_entsog(ctx)) == 0                # rate limit: stop, keep what is stored
+    assert ctx.db.observations("entsog:lng_nl", 50)[-1] == ("2026-10-10", 20.0)
+
+
+def test_parse_agsi():
+    from sessiondesk.connectors.keyed import parse_agsi
+    data = [{"code": "DE", "gasDayStart": "2026-10-19", "full": "77.81", "injection": "310.5", "withdrawal": "12.0", "gasInStorage": "191.2", "status": "C"},
+            {"code": "DE", "gasDayStart": "2026-10-18", "full": "77.6", "injection": "-", "withdrawal": "", "gasInStorage": "190.7", "status": "E"},
+            {"code": "DE", "gasDayStart": "2026-10-17", "full": "77.4", "status": "N"},
+            {"code": "21Z000000000271O", "gasDayStart": "2026-10-19", "full": "50"}]
+    rows = parse_agsi(data, "de")
+    assert [r["day"] for r in rows] == ["2026-10-18", "2026-10-19"]
+    assert rows[1] == {"day": "2026-10-19", "full": 77.81, "injection": 310.5, "withdrawal": 12.0, "stock": 191.2}
+    assert rows[0]["injection"] is None and parse_agsi([], "eu") == []
+
+
+def test_agsi_key_needed_then_collected_without_leaking(client, monkeypatch):
+    import httpx
+    monkeypatch.delenv("SESSIONDESK_AGSI_API_KEY", raising=False)
+    ctx = client.app_state["ctx"]
+    assert asyncio.run(datahub.collect_agsi(ctx)) == 0                  # no key: quietly nothing
+    d = client.get("/api/commodities").json()
+    assert d["gas_storage"] == [] and d["agsi"] == {"configured": False, "active": False, "verified": False}
+    assert not any(s["name"] == "GIE AGSI+" for s in d["more_sources"])
+
+    key = "agsitestkey98765"
+    r = client.post("/api/connectors/agsi", json={"enabled": True, "fields": {"api_key": key}}).json()
+    assert key not in str(r)
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if request.headers.get("x-key") != key:
+            return httpx.Response(200, json={"error": "access denied", "message": "Invalid or missing API key", "data": []})
+        code = request.url.params.get("country") or "eu"
+        page = int(request.url.params["page"])
+        day = "2026-10-19" if page == 1 else "2026-10-18"
+        return httpx.Response(200, json={"last_page": 2, "data": [{"code": code.upper() if code != "eu" else "eu", "gasDayStart": day,
+                                                                   "full": "80.5" if page == 1 else "80.0", "injection": "200",
+                                                                   "withdrawal": "5", "gasInStorage": "100", "status": "C"}]})
+    ctx.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(type(ctx.hub.get("agsi")), "PAUSE", 0)
+    assert asyncio.run(datahub.collect_agsi(ctx)) == len(datahub.AGSI_SCOPES)
+    assert {r.url.params.get("type") for r in seen} == {None, "eu"} and all(r.url.params["size"] == "300" for r in seen)
+    assert ctx.db.observations("agsi:de:full", 10) == [("2026-10-18", 80.0), ("2026-10-19", 80.5)]
+    d = client.get("/api/commodities").json()
+    de = next(s for s in d["gas_storage"] if s["code"] == "de")
+    assert de["full"] == 80.5 and de["full_prev"] == 80.0 and de["injection"] == 200.0 and de["name"] == "Germany"
+    assert [s["code"] for s in d["gas_storage"]][0] == "eu" and d["agsi"]["configured"] is True
+    for path in ("/api/connectors", "/api/commodities", "/api/hub"):
+        assert key not in client.get(path).text
+
+    ctx.http = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"error": "access denied", "message": "Invalid or missing API key", "data": []})))
+    assert asyncio.run(datahub.collect_agsi(ctx)) == 0                  # wrong key: stops, health shows the error
+    assert "access denied" in ctx.hub.health["agsi"]["last_error"]

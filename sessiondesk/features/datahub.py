@@ -5,6 +5,8 @@ Sources (free, no key needed):
   - market board: daily closes of indices, futures, yields, FX, commodities, crypto, volatility, sectors (Yahoo)
   - macro: Treasury curve, inflation, labour market, credit spreads, liquidity, euro yields (FRED)
   - oil: EIA Weekly Petroleum Status Report, U.S. stocks table (current and previous week; history builds up)
+  - power: European day-ahead prices (Energy-Charts); gas: EU imports by route and LNG send-out (ENTSOG)
+  - gas storage: GIE AGSI+ per country and EU (free key, only when the user entered one)
   - attention: headlines per day and theme (Fed, ECB, oil, tariffs, geopolitics ...) from your own news archive
 
 Early warning = the latest change is unusual for THIS series: robust z-score against its own last 250 changes
@@ -285,7 +287,7 @@ POWER_ZONES = [("DE-LU", "Germany"), ("FR", "France"), ("NL", "Netherlands"), ("
                ("CH", "Switzerland"), ("IT-North", "Italy North"), ("ES", "Spain"), ("PL", "Poland"), ("DK1", "Denmark West"),
                ("NO2", "Norway South"), ("SE3", "Sweden Central")]
 POWER_PAUSE = 20.0                                  # seconds between zones; the API answers 429 to quick bursts
-SLOW_COLLECTORS = {"power"}                         # "collect now" starts these in the background
+SLOW_COLLECTORS = {"power", "entsog", "agsi"}       # "collect now" starts these in the background
 
 
 def _berlin():
@@ -347,14 +349,207 @@ async def collect_power(ctx) -> int:
     return n
 
 
+# European gas imports from the ENTSOG Transparency Platform, free and without a key: daily physical flows at the
+# EU entry points, as reported by the transmission operators (recent days are "provisional" and get revised).
+# A point key is operator + point + direction. Each source is counted once, where it first enters the EU: TurkStream
+# at Strandzha 2 (not again at Horgos RS->HU), TAP at Kipoi (not again at Melendugno after Albania). Kotlovka BY->LT
+# is transit to Kaliningrad and left out. The Emden landing points (Norpipe, Europipe I) publish no flows on ENTSOG,
+# so the Norway route covers the reported points only - checked live 2026-10-20.
+ENTSOG_URL = "https://transparency.entsog.eu/api/v1/operationalData"
+ENTSOG_SOURCE = "ENTSOG Transparency Platform (physical flows reported by the operators)"
+ENTSOG_ROUTES = [
+    ("norway", "Norway → EU pipelines (Emden not published)",
+     ["fr-tso-0003itp-00045entry", "be-tso-0001itp-00106entry", "de-tso-0009itp-00525entry", "dk-tso-0001itp-00630entry"]),
+    ("turkstream", "Russia → EU via TurkStream (Strandzha 2)", ["bg-tso-0001itp-00549entry"]),
+    ("algeria", "Algeria → EU (Transmed, Medgaz)", ["it-tso-0001itp-00093entry", "es-tso-0006itp-00048entry"]),
+    ("libya", "Libya → Italy (Greenstream)", ["it-tso-0001itp-00074entry"]),
+    ("tap", "Azerbaijan → EU via TAP (Kipoi)", ["al-tso-0001itp-00274entry"]),
+    ("uk", "UK → EU (Interconnector, BBL)", ["be-tso-0001itp-00061entry", "uk-tso-0004itp-00207entry"]),
+]
+ENTSOG_LNG = [
+    ("NL", "Netherlands", ["nl-tso-0001lng-00027entry", "nl-tso-0001lng-00068entry"]),
+    ("ES", "Spain", ["es-tso-0006lng-000%sentry" % n for n in ("12", "13", "16", "18", "21", "22", "23")]),
+    ("IT", "Italy", ["it-tso-0001lng-000%sentry" % n for n in ("04", "15", "19", "69", "82")]),
+    ("FR", "France", ["fr-tso-0003lng-00024entry", "fr-tso-0003lng-00029entry"]),
+    ("DE", "Germany", ["de-tso-0005lng-00060entry", "de-tso-0009lng-00083entry", "de-tso-0001lng-00079entry", "de-tso-0017lng-00075entry"]),
+    ("PT", "Portugal", ["pt-tso-0001lng-00026entry"]),
+    ("PL", "Poland", ["pl-tso-0002lng-00006entry"]),
+    ("BE", "Belgium", ["be-tso-0001lng-00017entry"]),
+    ("GR", "Greece", ["gr-tso-0001lng-00014entry"]),
+    ("HR", "Croatia", ["hr-tso-0001lng-00032entry"]),
+    ("LT", "Lithuania", ["lt-tso-0001lng-00030entry"]),
+    ("FI", "Finland", ["fi-tso-0003lng-00011entry", "fi-tso-0003lng-00072entry"]),
+]
+ENTSOG_PAUSE = 4.0                                  # seconds between requests
+# Early warnings only where the robust z-score means something. Single routes and LNG countries move in steps
+# (nominations, cargoes): on three years of data TAP would have warned on 52 of the last 120 days, Libya on 44,
+# Polish LNG on 55, the two totals on 1 and 0 (measured 2026-10-20). So only the totals warn. AGSI injection and
+# withdrawal sit at zero for months and then jump; the fill level keeps its warnings.
+NO_WARN_PREFIX = ("entsog:",)
+NO_WARN_SUFFIX = (":injection", ":withdrawal")
+WARN_ANYWAY = {"entsog:total", "entsog:lng_total"}
+
+
+def warns(series_id: str) -> bool:
+    """Does this series take part in the early warnings? (pure, tested)"""
+    if series_id in WARN_ANYWAY:
+        return True
+    return not (series_id.startswith(NO_WARN_PREFIX) or (series_id.startswith("agsi:") and series_id.endswith(NO_WARN_SUFFIX)))
+ENTSOG_CATEGORY = "Gas flows (ENTSOG)"
+
+
+def entsog_groups() -> dict[str, tuple[str, list[str]]]:
+    """series key -> (label, point keys): one series per route and per LNG country."""
+    out = {k: (label, keys) for k, label, keys in ENTSOG_ROUTES}
+    out.update({"lng_" + c.lower(): (f"LNG send-out {name}", keys) for c, name, keys in ENTSOG_LNG})
+    return out
+
+
+def entsog_daily(rows: list[dict], groups: dict[str, list[str]], now=None, stale_days: int = 10) -> dict[str, list[tuple[str, float]]]:
+    """ENTSOG operationalData rows -> {series: [(gas day, GWh/d)]} (pure, tested).
+    The gas day still running (06:00 to 06:00 CET) is left out: operators publish it hourly as a partial value.
+    A day only counts when every point of the series that reports at all has reported it: a point is expected
+    from its first row on, and up to the end unless it fell silent more than `stale_days` before the newest day
+    (a closed terminal must not freeze its series; a point that is merely late must not shrink the latest sum)."""
+    import datetime as dt
+    now = now or dt.datetime.now(dt.timezone.utc)
+    vals: dict[str, dict[str, float]] = {}
+    for r in rows:
+        key = f"{r.get('operatorKey', '')}{r.get('pointKey', '')}{r.get('directionKey', '')}".lower()
+        try:
+            v = float(r.get("value"))
+            if r.get("periodTo") and dt.datetime.fromisoformat(r["periodTo"]) > now:
+                continue
+        except (TypeError, ValueError):
+            continue
+        day = str(r.get("periodFrom") or "")[:10]
+        if day:
+            vals.setdefault(key, {})[day] = v
+    if not vals:
+        return {}
+    newest = max(d for v in vals.values() for d in v)
+    cutoff = (dt.date.fromisoformat(newest) - dt.timedelta(days=stale_days)).isoformat()
+    out = {}
+    for name, keys in groups.items():
+        live = [k for k in keys if k in vals]
+        if not live:
+            continue
+        span = {k: (min(vals[k]), max(vals[k])) for k in live}
+        pts = []
+        for day in sorted({d for k in live for d in vals[k]}):
+            expected = [k for k in live if span[k][0] <= day and (day <= span[k][1] or span[k][1] >= cutoff)]
+            if all(day in vals[k] for k in expected):
+                pts.append((day, round(sum(vals[k][day] for k in expected) / 1e6, 3)))
+        out[name] = pts
+    return out
+
+
+def sum_complete(parts: list[list[tuple[str, float]]]) -> list[tuple[str, float]]:
+    """Day-by-day sum of several series, only on days all of them have (pure, tested)."""
+    if not parts or not all(parts):
+        return []
+    maps = [dict(p) for p in parts]
+    days = set(maps[0]).intersection(*maps[1:])
+    return [(d, round(sum(m[d] for m in maps), 3)) for d in sorted(days)]
+
+
+async def collect_entsog(ctx) -> int:
+    """Daily EU gas imports by route and LNG send-out by country. The first run loads three years in one-year
+    chunks; later runs reload the last two weeks (provisional values get revised). Any failed request aborts the
+    run, so a half-loaded window is never stored."""
+    import asyncio
+    import datetime as dt
+    groups = entsog_groups()
+    keys = [k for _, ks in groups.values() for k in ks]
+    have = await ctx.db.run(ctx.db.observations, "entsog:total", 400)
+    today = dt.date.today()
+    start = today - dt.timedelta(days=3 * 365 if len(have) < 300 else 14)
+    windows, a = [], start
+    while a <= today:
+        b = min(a + dt.timedelta(days=365), today)
+        windows.append((a, b))
+        a = b + dt.timedelta(days=1)
+    rows, first = [], True
+    for a, b in windows:
+        for i in range(0, len(keys), 20):
+            if not first:
+                await asyncio.sleep(ENTSOG_PAUSE)
+            first = False
+            try:
+                resp = await ctx.http.get(ENTSOG_URL, params={"limit": -1, "indicator": "Physical Flow", "periodType": "day",
+                                                               "timezone": "CET", "from": a.isoformat(), "to": b.isoformat(),
+                                                               "pointDirection": ",".join(keys[i:i + 20])},
+                                          headers={"User-Agent": "SessionDesk"}, timeout=120)
+            except Exception:
+                return 0
+            if resp.status_code == 404 and "No result" in resp.text:     # no rows for these points in this window
+                continue
+            if resp.status_code != 200:              # 429 included: stop and try again next run
+                return 0
+            try:
+                rows += resp.json().get("operationalData") or []
+            except ValueError:
+                return 0
+    daily = entsog_daily(rows, {k: ks for k, (_, ks) in groups.items()})
+    lng = [daily.get("lng_" + c.lower(), []) for c, _, _ in ENTSOG_LNG]
+    daily["lng_total"] = sum_complete(lng)
+    daily["total"] = sum_complete([daily.get(k, []) for k, _, _ in ENTSOG_ROUTES] + [daily["lng_total"]])
+    labels = {k: label for k, (label, _) in groups.items()}
+    labels.update({"lng_total": "LNG send-out EU total", "total": "EU gas imports total (pipelines + LNG)"})
+    n = 0
+    for k, pts in daily.items():
+        if pts:
+            await ctx.db.run(ctx.db.upsert_series, _meta("entsog:" + k, f"{labels[k]} (GWh/d)", ENTSOG_CATEGORY, ENTSOG_SOURCE, "level"), pts)
+            n += 1
+    return n
+
+
+# EU gas storage from GIE AGSI+ (free key, entered by the user in Settings -> Connectors; connector `agsi`).
+AGSI_SCOPES = [("eu", "EU"), ("DE", "Germany"), ("IT", "Italy"), ("FR", "France"), ("NL", "Netherlands"), ("AT", "Austria")]
+AGSI_CATEGORY = "Gas storage (AGSI+)"
+AGSI_SOURCE = "GIE AGSI+ (Aggregated Gas Storage Inventory)"
+AGSI_FIELDS = [("full", "fill level (%)"), ("injection", "injection (GWh/d)"), ("withdrawal", "withdrawal (GWh/d)")]
+
+
+async def collect_agsi(ctx) -> int:
+    """Fill level, injection and withdrawal per country and for the EU. Skips quietly without a key; the first
+    run per country loads three years, later runs the last two weeks (operators revise recent days)."""
+    import datetime as dt
+    conn = ctx.hub.get("agsi") if ctx.hub else None
+    if not conn or not conn.active():
+        return 0
+    today = dt.date.today()
+    n = 0
+    for code, label in AGSI_SCOPES:
+        base = f"agsi:{code.lower()}"
+        have = await ctx.db.run(ctx.db.observations, base + ":full", 400)
+        start = today - dt.timedelta(days=3 * 365 if len(have) < 300 else 14)
+        try:
+            days = await conn.storage(code, start.isoformat(), today.isoformat())
+        except Exception as exc:                     # bad key, 429, outage: stop until the next run
+            ctx.hub.mark("agsi", f"storage: {exc}")
+            break
+        ctx.hub.mark("agsi")
+        for field, what in AGSI_FIELDS:
+            pts = [(d["day"], d[field]) for d in days if d.get(field) is not None]
+            if pts:
+                await ctx.db.run(ctx.db.upsert_series, _meta(f"{base}:{field}", f"Gas storage {label} {what}", AGSI_CATEGORY,
+                                                             AGSI_SOURCE, "level"), pts)
+        n += 1
+    return n
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
-              "news": (collect_news, 3600), "power": (collect_power, 3 * 3600)}
+              "news": (collect_news, 3600), "power": (collect_power, 3 * 3600), "entsog": (collect_entsog, 6 * 3600),
+              "agsi": (collect_agsi, 6 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views
 async def scan(ctx, publish: bool = True) -> list[dict]:
     out = []
     for s in await ctx.db.run(ctx.db.series_list):
+        if not warns(s["id"]):
+            continue                                   # moves in steps by nature (see NO_WARN_PREFIX)
         pts = await ctx.db.run(ctx.db.observations, s["id"], 400)
         a = assess(pts, s["kind"])
         if not a or abs(a["z"]) < Z_WARN:
@@ -392,6 +587,11 @@ def source_url(series_id: str) -> str | None:
     if kind == "power":
         zone = next((z for z, _ in POWER_ZONES if z.lower() == key), key.upper())
         return f"https://www.energy-charts.info/charts/price_spot_market/chart.htm?l=en&c={zone.split('-')[0]}"
+    if kind == "entsog":
+        return "https://transparency.entsog.eu/#/map"
+    if kind == "agsi":
+        code = key.split(":")[0]
+        return "https://agsi.gie.eu/data-overview/" + (code if code == "eu" else code.upper())
     if kind == "basket":
         return "#/baskets/" + key
     if kind == "news":

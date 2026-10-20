@@ -10,6 +10,7 @@ verified=False until someone runs them with a real key - the Connectors page sho
   alphavantage      news with sentiment, quotes (25 calls/day on the free key)
   tradingeconomics  economic calendar WITH actual values (fast release output)
   alpaca            broker, READ-ONLY: account + positions; plus Benzinga news and IEX quotes
+  agsi              GIE AGSI+: EU gas storage per country (fill level, injection, withdrawal), free key
 """
 from __future__ import annotations
 
@@ -394,3 +395,64 @@ class Alpaca(Connector):
                             "change_pct": (price / prev - 1) * 100 if prev else None,
                             "time": _iso_ts((s.get("latestTrade") or {}).get("t"))}
         return out
+
+
+# ================================================================== GIE AGSI+
+def parse_agsi(data: list[dict], code: str) -> list[dict]:
+    """AGSI+ /api entries -> [{day, full, injection, withdrawal, stock}] for one country or the EU, oldest first.
+    Only top-level entries whose code matches; values come as strings, "-" or empty means no data (pure, tested)."""
+    def num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+    out = {}
+    for e in data or []:
+        if str(e.get("code") or "").lower() != code.lower() or not e.get("gasDayStart"):
+            continue
+        if str(e.get("status") or "").upper() == "N":           # "no data" for that day
+            continue
+        out[e["gasDayStart"]] = {"day": e["gasDayStart"], "full": num(e.get("full")), "injection": num(e.get("injection")),
+                                 "withdrawal": num(e.get("withdrawal")), "stock": num(e.get("gasInStorage"))}
+    return [out[d] for d in sorted(out)]
+
+
+class Agsi(Connector):
+    id = "agsi"
+    name = "GIE AGSI+ (EU gas storage)"
+    tier = "free-key"
+    kind = "data"
+    capabilities = ("series",)
+    fields = (Field("api_key", "API key", help="Free account at agsi.gie.eu -> My account -> API key. Sent as the x-key header."),)
+    homepage = "https://agsi.gie.eu"
+    description = "European gas storage per country and for the EU: fill level, injection, withdrawal, with history (daily, ~18:00 CET)."
+    verified = False
+    URL = "https://agsi.gie.eu/api"
+    PAUSE = 1.2                       # the API queues accounts above 60 calls per minute
+
+    async def _page(self, params: dict) -> dict:
+        data = await self.get_json(self.URL, params=params, headers={"x-key": self.secret("api_key") or "",
+                                                                     "User-Agent": "SessionDesk"}, timeout=30)
+        if data.get("error"):           # a missing or wrong key answers HTTP 200 with {"error": "access denied"}
+            raise ConnectorError(f"{self.name}: {data.get('error')} - {data.get('message') or 'check the key'}")
+        return data
+
+    async def storage(self, code: str, start: str, end: str) -> list[dict]:
+        """Daily storage figures for a country code (DE, IT, ...) or "eu", between two ISO dates."""
+        scope = {"type": "eu"} if code.lower() == "eu" else {"country": code.lower()}
+        entries, page, last = [], 1, 1
+        while page <= last and page <= 20:
+            if page > 1:
+                await asyncio.sleep(self.PAUSE)
+            data = await self._page({**scope, "from": start, "to": end, "size": 300, "page": page})
+            entries += data.get("data") or []
+            last = int(data.get("last_page") or 1)
+            page += 1
+        return parse_agsi(entries, code)
+
+    async def test(self) -> dict:
+        today = dt.date.today()
+        rows = await self.storage("eu", (today - dt.timedelta(days=7)).isoformat(), today.isoformat())
+        if not rows:
+            return {"ok": False, "detail": "no data returned"}
+        return {"ok": True, "detail": f"EU storage {rows[-1]['full']}% full ({rows[-1]['day']})"}

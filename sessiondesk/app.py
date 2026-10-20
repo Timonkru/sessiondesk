@@ -1037,6 +1037,8 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("eia"), first_delay=240, name="hub eia"),
         every(lambda: 3600, hub_loop("news"), first_delay=150, name="hub news"),
         every(lambda: 3 * 3600, hub_loop("power"), first_delay=300, name="hub power"),
+        every(lambda: 6 * 3600, hub_loop("entsog"), first_delay=360, name="hub entsog"),
+        every(lambda: 6 * 3600, hub_loop("agsi"), first_delay=420, name="hub agsi"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),

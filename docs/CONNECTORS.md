@@ -39,6 +39,18 @@ News and calendars are merged across all active sources and de-duplicated.
 4. Add the class to `ALL` in `connectors/registry.py`.
 5. Add an offline test with a canned payload (see `tests/conftest.py`).
 
+## Energy fundamentals (Data hub collectors)
+
+These feed the Data hub and the Commodities & energy page. They run in the background (every few hours) and
+load their history once on the first run.
+
+| Source | Key | What | Notes |
+|---|---|---|---|
+| EIA | none | US weekly oil stocks and gas storage | history pages scraped once per series |
+| Energy-Charts | none | day-ahead power prices, 12 bidding zones | CC BY 4.0, Bundesnetzagentur / SMARD.de |
+| ENTSOG Transparency Platform | none | daily physical gas flows at the EU entry points (`api/v1/operationalData`), summed per route and per LNG country | each source is counted once where it enters the EU (TurkStream at Strandzha 2, TAP at Kipoi); Kotlovka (transit to Kaliningrad) is left out; the Emden landing points publish no flows, so the Norway route is incomplete; recent days are provisional and are reloaded for two weeks |
+| GIE AGSI+ (`agsi`) | free key, header `x-key` | gas storage fill level, injection, withdrawal for the EU, DE, IT, FR, NL, AT | create the key at agsi.gie.eu, enter it under Settings → Connectors; at most 60 calls per minute, SessionDesk pauses between pages; without a key the collector does nothing and the page says "key needed" |
+
 ## Default feed lists
 
 - Squawk: investingLive, FinancialJuice.

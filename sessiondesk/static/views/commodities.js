@@ -1,6 +1,19 @@
-// Commodities & energy: futures by group with 1 day to 1 year, EIA oil and gas inventories, sources to connect for more.
+// Commodities & energy: futures by group with 1 day to 1 year, power prices, EU gas imports (ENTSOG) and storage (AGSI+),
+// EIA oil and gas inventories, sources to connect for more.
 import { api } from "../lib/api.js";
 import { h, clear, table, section, num, pct, price, dir, sparkline, note, loading, errorBox } from "../lib/ui.js";
+
+const FLOW_TOTALS = new Set(["entsog:total", "entsog:lng_total"]);
+const flowName = (s) => s.name.replace(/ \(GWh\/d\)$/, "").replace(/^LNG send-out (?!EU total)/, "LNG · ");
+const flowShort = (s) => flowName(s).replace(/ \((.*)\)$/, "");          // the detail in brackets goes to the tooltip
+const flowDetail = (s) => (flowName(s).match(/ \((.*)\)$/) || [])[1] || "";
+const pp = (v) => (v == null ? "–" : `${v > 0 ? "+" : ""}${num(v, 2)}`);
+
+function storageEmpty(agsi) {
+  if (!agsi || !agsi.configured) return "Key needed: AGSI+ is free but needs your own key - create one at agsi.gie.eu, then Settings → Connectors → GIE AGSI+.";
+  if (!agsi.active) return "The GIE AGSI+ connector is switched off (Settings → Connectors).";
+  return "Not collected yet - Data hub → collect now (runs in the background), or wait for the next run.";
+}
 
 const PERIODS = [["1d", "1 day"], ["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["ytd", "YTD"], ["1y", "1 year"]];
 
@@ -31,6 +44,33 @@ export async function render(root, _params, ctx) {
       note("Day-ahead auction results, average of all hours of the delivery day; tomorrow's prices appear after the auction (~13:00 CET). "
         + "Source: Energy-Charts (Fraunhofer ISE), data Bundesnetzagentur | SMARD.de, licence CC BY 4.0."),
       (d.power || []).length ? h("p", { class: "small" }, h("a", { href: (d.power[0] || {}).url, target: "_blank", rel: "noopener noreferrer" }, "Energy-Charts ↗")) : null),
+    section("EU gas imports by route (ENTSOG, GWh/d)", table([
+      { label: "Route", render: (s) => { const a = h("a", { href: "#/hub/" + encodeURIComponent(s.id), title: flowDetail(s) }, flowShort(s)); return FLOW_TOTALS.has(s.id) ? h("strong", null, a) : a; } },
+      { label: "Gas day", render: (s) => h("span", { class: "muted small", style: { whiteSpace: "nowrap" } }, s.day) },
+      { label: "GWh/d", num: true, render: (s) => num(s.last, 0) },
+      { label: "Prev. day", num: true, cls: (s) => dir(s.last - s.prev), render: (s) => num(s.prev, 0) },
+      { label: "30-day avg", num: true, render: (s) => num(s.avg30, 0) },
+      { label: "Year ago", num: true, render: (s) => num(s.year_ago, 0) },
+      { label: "60 days", num: true, render: (s) => sparkline(s.spark) },
+    ], d.gas_flows || [], { empty: "Not collected yet - the ENTSOG collector runs a few minutes after start (first run loads three years)." }),
+      note("Physical flows at the EU entry points as reported by the gas transmission operators; the latest days are provisional "
+        + "and get revised. Each source is counted once where it enters the EU (TurkStream at Strandzha 2, TAP at Kipoi). The Norway "
+        + "route misses the Emden landing points, which publish no flows on ENTSOG. 1 GWh/d ≈ 0.095 million m³/d."),
+      h("p", { class: "small" }, h("a", { href: "https://transparency.entsog.eu/", target: "_blank", rel: "noopener noreferrer" }, "ENTSOG Transparency Platform ↗"))),
+    section("EU gas storage (GIE AGSI+)", table([
+      { label: "", render: (s) => h("a", { href: "#/hub/" + encodeURIComponent(s.id) }, s.name) },
+      { label: "Gas day", render: (s) => h("span", { class: "muted small", style: { whiteSpace: "nowrap" } }, s.day) },
+      { label: "Full %", num: true, render: (s) => num(s.full, 1) },
+      { label: "Day (pp)", num: true, cls: (s) => dir(s.full - s.full_prev), render: (s) => pp(s.full_prev == null ? null : s.full - s.full_prev) },
+      { label: "Year ago %", num: true, render: (s) => num(s.full_year_ago, 1) },
+      { label: "Injection", num: true, render: (s) => num(s.injection, 0) },
+      { label: "Withdrawal", num: true, render: (s) => num(s.withdrawal, 0) },
+      { label: "60 days", num: true, render: (s) => sparkline(s.spark) },
+    ], d.gas_storage || [], { empty: storageEmpty(d.agsi) }),
+      note("Fill level of working gas volume, injection and withdrawal in GWh/d, reported by the storage operators (daily, around 18:00 CET). "
+        + "Free key from GIE, stored only on this machine."
+        + (d.agsi && d.agsi.configured && !d.agsi.verified ? " The connector is new and marked unverified until a live call succeeded (Settings → Connectors → Test connection)." : "")),
+      h("p", { class: "small" }, h("a", { href: "https://agsi.gie.eu/", target: "_blank", rel: "noopener noreferrer" }, "GIE AGSI+ ↗"))),
     section("Inventories (EIA weekly)", table([
       { label: "Series", render: (s) => h("a", { href: "#/hub/" + encodeURIComponent(s.id) }, s.name) },
       { label: "Latest", num: true, render: (s) => num(s.last, 1) },
@@ -45,5 +85,7 @@ export async function render(root, _params, ctx) {
     ], d.more_sources || []), note("Free-key sources are planned connectors; paid ones plug in the same way for those who have a subscription.")));
   clear(body, h("div", { class: "cols" }, left, right), note(d.note));
   ctx.setContext({ page: "Commodities & energy", power: (d.power || []).map((s) => ({ zone: s.name, day: s.day, price: s.last, prev: s.prev, avg30: s.avg30, avg365: s.avg365 })), prices: (d.groups || []).map((g) => ({ group: g.group, rows: g.rows.map((r) => ({ name: r.name, symbol: r.symbol, last: r.last, "1d": r["1d"], "1m": r["1m"], ytd: r.ytd, "1y": r["1y"] })) })),
-    inventories: d.fundamentals });
+    inventories: d.fundamentals,
+    gas_imports: (d.gas_flows || []).map((s) => ({ route: flowName(s), day: s.day, gwh_d: s.last, prev: s.prev, avg30: s.avg30, year_ago: s.year_ago })),
+    gas_storage: (d.gas_storage || []).map((s) => ({ area: s.name, day: s.day, full_pct: s.full, prev_pct: s.full_prev, year_ago_pct: s.full_year_ago, injection: s.injection, withdrawal: s.withdrawal })) });
 }
