@@ -16,8 +16,9 @@ GROUPS = [
                      ("CT=F", "Cotton"), ("OJ=F", "Orange juice"), ("LE=F", "Live cattle"), ("HE=F", "Lean hogs")]),
 ]
 FUNDAMENTAL_CATEGORIES = ("Oil (EIA weekly)", "Gas (EIA weekly)")
+POWER_CATEGORY = "Power (day-ahead)"
 MORE_SOURCES = [
-    ("ENTSO-E Transparency", "free key", "European power: day-ahead prices, load, generation by fuel, cross-border flows"),
+    ("ENTSO-E Transparency", "free key", "European power: load, generation by fuel, cross-border flows (day-ahead prices are already in via Energy-Charts)"),
     ("GIE AGSI+", "free key", "European gas storage per country and site (fill level, injection, withdrawal)"),
     ("ENTSOG Transparency", "free", "European gas pipeline flows per entry/exit point"),
     ("USDA NASS / WASDE", "free key", "US crop progress, stocks, supply and demand estimates"),
@@ -45,13 +46,23 @@ async def board(ctx) -> dict:
             out.append({"group": g, "rows": rows})
         return {"groups": out, "asof": time.time()}
     prices = await ctx.cache.get("commodities:board", 900, build)
-    fundamentals = []
+    fundamentals, power = [], []
     for s in await ctx.db.run(ctx.db.series_list):
+        if s["category"] == POWER_CATEGORY:
+            pts = await ctx.db.run(ctx.db.observations, s["id"], 400)
+            if pts:
+                vals = [v for _, v in pts]
+                power.append({**s, "url": source_url(s["id"]), "last": vals[-1], "day": pts[-1][0],
+                              "prev": vals[-2] if len(vals) > 1 else None,
+                              "avg30": sum(vals[-31:-1]) / len(vals[-31:-1]) if len(vals) > 30 else None,
+                              "avg365": sum(vals[-366:-1]) / len(vals[-366:-1]) if len(vals) > 300 else None,
+                              "spark": vals[-60:]})
+            continue
         if s["category"] in FUNDAMENTAL_CATEGORIES:
             pts = await ctx.db.run(ctx.db.observations, s["id"], 60)
             if pts:
                 fundamentals.append({**s, "url": source_url(s["id"]), "last": pts[-1][1], "day": pts[-1][0], "prev": pts[-2][1] if len(pts) > 1 else None,
                                      "change": pts[-1][1] - pts[-2][1] if len(pts) > 1 else None})
-    return {**prices, "fundamentals": fundamentals, "more_sources": [{"name": n, "access": a, "what": w} for n, a, w in MORE_SOURCES],
+    return {**prices, "fundamentals": fundamentals, "power": power, "more_sources": [{"name": n, "access": a, "what": w} for n, a, w in MORE_SOURCES],
             "note": "Front-month futures (rolling contracts jump at expiry) and one uranium ETF, free daily closes. Inventories from the "
                     "EIA weekly reports; their history in SessionDesk starts with the first collection."}

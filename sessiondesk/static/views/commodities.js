@@ -19,6 +19,18 @@ export async function render(root, _params, ctx) {
     ], g.rows, { empty: "No prices." })));
   }
   right.append(
+    section("Power day-ahead (EUR/MWh, daily base)", table([
+      { label: "Zone", render: (s) => h("a", { href: "#/hub/" + encodeURIComponent(s.id) }, s.name.replace(/^Power day-ahead /, "").replace(/ \(EUR\/MWh, daily base\)$/, "")) },
+      { label: "Day", render: (s) => h("span", { class: "muted small" }, s.day) },
+      { label: "Price", num: true, render: (s) => num(s.last, 1) },
+      { label: "Prev. day", num: true, cls: (s) => dir(s.last - s.prev), render: (s) => num(s.prev, 1) },
+      { label: "30-day avg", num: true, render: (s) => num(s.avg30, 1) },
+      { label: "1-year avg", num: true, render: (s) => num(s.avg365, 1) },
+      { label: "60 days", num: true, render: (s) => sparkline(s.spark) },
+    ], d.power || [], { empty: "Not collected yet - the power collector runs a few minutes after start (one zone every few seconds)." }),
+      note("Day-ahead auction results, average of all hours of the delivery day; tomorrow's prices appear after the auction (~13:00 CET). "
+        + "Source: Energy-Charts (Fraunhofer ISE), data Bundesnetzagentur | SMARD.de, licence CC BY 4.0."),
+      (d.power || []).length ? h("p", { class: "small" }, h("a", { href: (d.power[0] || {}).url, target: "_blank", rel: "noopener noreferrer" }, "Energy-Charts ↗")) : null),
     section("Inventories (EIA weekly)", table([
       { label: "Series", render: (s) => h("a", { href: "#/hub/" + encodeURIComponent(s.id) }, s.name) },
       { label: "Latest", num: true, render: (s) => num(s.last, 1) },
@@ -32,6 +44,6 @@ export async function render(root, _params, ctx) {
       { label: "Adds", render: (s) => h("span", { class: "small" }, s.what) },
     ], d.more_sources || []), note("Free-key sources are planned connectors; paid ones plug in the same way for those who have a subscription.")));
   clear(body, h("div", { class: "cols" }, left, right), note(d.note));
-  ctx.setContext({ page: "Commodities & energy", prices: (d.groups || []).map((g) => ({ group: g.group, rows: g.rows.map((r) => ({ name: r.name, symbol: r.symbol, last: r.last, "1d": r["1d"], "1m": r["1m"], ytd: r.ytd, "1y": r["1y"] })) })),
+  ctx.setContext({ page: "Commodities & energy", power: (d.power || []).map((s) => ({ zone: s.name, day: s.day, price: s.last, prev: s.prev, avg30: s.avg30, avg365: s.avg365 })), prices: (d.groups || []).map((g) => ({ group: g.group, rows: g.rows.map((r) => ({ name: r.name, symbol: r.symbol, last: r.last, "1d": r["1d"], "1m": r["1m"], ytd: r.ytd, "1y": r["1y"] })) })),
     inventories: d.fundamentals });
 }

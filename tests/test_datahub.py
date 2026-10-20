@@ -82,3 +82,14 @@ def test_source_urls():
     assert datahub.source_url("eiagas:lower_48_total").endswith("nw2_epg0_swo_r48_bcfw.htm")
     assert datahub.source_url("eiagas:east:vs5y") == datahub.EIA_GAS_REPORT
     assert datahub.source_url("basket:ab12") == "#/baskets/ab12" and datahub.source_url("x:y") is None
+
+
+def test_power_daily_base_price():
+    import datetime as dt
+    utc = dt.timezone.utc
+    day1 = int(dt.datetime(2026, 10, 19, tzinfo=utc).timestamp())
+    unix = [day1 + i * 900 for i in range(96)] + [day1 + 86400 + i * 900 for i in range(10)]   # day 2 only partly published
+    prices = [100.0] * 48 + [50.0] * 47 + [None] + [80.0] * 10
+    assert datahub.power_daily(unix, prices, utc) == [("2026-10-19", round((48 * 100 + 47 * 50) / 95, 2))]
+    assert datahub.power_daily([], [], utc) == []
+    assert "c=DE" in datahub.source_url("power:de-lu")

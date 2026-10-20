@@ -446,7 +446,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def post_hub_collect():
         from .features import datahub
         ctx = C()
-        done = {name: await fn(ctx) for name, (fn, _) in datahub.COLLECTORS.items()}
+        done = {}
+        for name, (fn, _) in datahub.COLLECTORS.items():
+            if name in datahub.SLOW_COLLECTORS:
+                task = asyncio.ensure_future(fn(ctx))
+                state.setdefault("tasks", set()).add(task)
+                task.add_done_callback(state["tasks"].discard)
+                done[name] = "started"
+            else:
+                done[name] = await fn(ctx)
         return {"collected": done, "warnings": len(await datahub.scan(ctx))}
 
     @app.get("/api/baskets")
@@ -1006,6 +1014,7 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("fred"), first_delay=200, name="hub fred"),
         every(lambda: 6 * 3600, hub_loop("eia"), first_delay=240, name="hub eia"),
         every(lambda: 3600, hub_loop("news"), first_delay=150, name="hub news"),
+        every(lambda: 3 * 3600, hub_loop("power"), first_delay=300, name="hub power"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),

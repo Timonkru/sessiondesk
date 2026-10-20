@@ -277,8 +277,78 @@ async def collect_eia_all(ctx) -> int:
     return await collect_eia(ctx) + await collect_eia_gas(ctx)
 
 
+# European day-ahead power prices from Energy-Charts (Fraunhofer ISE), free and without a key. Data licence
+# CC BY 4.0, Bundesnetzagentur | SMARD.de - the attribution travels with every series as its source.
+POWER_URL = "https://api.energy-charts.info/price"
+POWER_SOURCE = "Energy-Charts (Fraunhofer ISE), data Bundesnetzagentur | SMARD.de, CC BY 4.0"
+POWER_ZONES = [("DE-LU", "Germany"), ("FR", "France"), ("NL", "Netherlands"), ("BE", "Belgium"), ("AT", "Austria"),
+               ("CH", "Switzerland"), ("IT-North", "Italy North"), ("ES", "Spain"), ("PL", "Poland"), ("DK1", "Denmark West"),
+               ("NO2", "Norway South"), ("SE3", "Sweden Central")]
+POWER_PAUSE = 20.0                                  # seconds between zones; the API answers 429 to quick bursts
+SLOW_COLLECTORS = {"power"}                         # "collect now" starts these in the background
+
+
+def _berlin():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("Europe/Berlin")
+    except Exception:                                # no tz database: CET without summer time is close enough for days
+        import datetime as dt
+        return dt.timezone(dt.timedelta(hours=1))
+
+
+def power_daily(unix: list, prices: list, tz=None) -> list[tuple[str, float]]:
+    """Quarter-hour (or hourly) day-ahead prices -> daily base price per local delivery day (pure, tested).
+    A day needs at least 20 prices, so a half-published day is not shown as a full one."""
+    import datetime as dt
+    tz = tz or _berlin()
+    days: dict[str, list[float]] = {}
+    for t, p in zip(unix or [], prices or []):
+        if p is None:
+            continue
+        days.setdefault(dt.datetime.fromtimestamp(t, tz).date().isoformat(), []).append(p)
+    return [(d, round(sum(v) / len(v), 2)) for d, v in sorted(days.items()) if len(v) >= 20]
+
+
+async def collect_power(ctx) -> int:
+    """One request per zone, spaced out; a zone is skipped when its newest delivery day is already known
+    (tomorrow, or today before the ~13:00 CET auction result)."""
+    import asyncio
+    import datetime as dt
+    tz = _berlin()
+    now = dt.datetime.now(tz)
+    today = now.date()
+    n = 0
+    for i, (zone, label) in enumerate(POWER_ZONES):
+        sid = "power:" + zone.lower()
+        have = await ctx.db.run(ctx.db.observations, sid, 60)
+        last = have[-1][0] if have else ""
+        if last >= (today + dt.timedelta(days=1)).isoformat() or (last >= today.isoformat() and now.hour < 13):
+            continue
+        start = today - dt.timedelta(days=3 * 365 if len(have) < 50 else 10)
+        if i and n:
+            await asyncio.sleep(POWER_PAUSE)
+        try:
+            resp = await ctx.http.get(POWER_URL, params={"bzn": zone, "start": start.isoformat(),
+                                                          "end": (today + dt.timedelta(days=2)).isoformat()},
+                                      headers={"User-Agent": "SessionDesk"}, timeout=60)
+        except Exception:
+            continue
+        if resp.status_code == 429:                  # back off until the next run
+            break
+        if resp.status_code != 200:
+            continue
+        data = resp.json()
+        pts = power_daily(data.get("unix_seconds"), data.get("price"), tz)
+        if pts:
+            await ctx.db.run(ctx.db.upsert_series, _meta(sid, f"Power day-ahead {label} (EUR/MWh, daily base)", "Power (day-ahead)",
+                                                         POWER_SOURCE, "level"), pts)
+            n += 1
+    return n
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
-              "news": (collect_news, 3600)}
+              "news": (collect_news, 3600), "power": (collect_power, 3 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views
@@ -319,6 +389,9 @@ def source_url(series_id: str) -> str | None:
         region = key.split(":")[0]
         code = next((c for r, c in EIA_GAS_HISTORY.items() if r.lower().replace(" ", "_") == region), None)
         return EIA_GAS_HISTORY_URL.format(code=code.lower()) if code and not key.endswith(":vs5y") else EIA_GAS_REPORT
+    if kind == "power":
+        zone = next((z for z, _ in POWER_ZONES if z.lower() == key), key.upper())
+        return f"https://www.energy-charts.info/charts/price_spot_market/chart.htm?l=en&c={zone.split('-')[0]}"
     if kind == "basket":
         return "#/baskets/" + key
     if kind == "news":
