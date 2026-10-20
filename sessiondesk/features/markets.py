@@ -7,9 +7,15 @@ Every quote carries the connector it came from.
 from __future__ import annotations
 
 OVERVIEW: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Indices", [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^DJI", "Dow Jones"), ("^RUT", "Russell 2000"),
-                 ("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"), ("^FTSE", "FTSE 100"), ("^N225", "Nikkei 225"),
-                 ("^HSI", "Hang Seng")]),
+    ("Americas", [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^DJI", "Dow Jones"), ("^RUT", "Russell 2000"),
+                  ("^GSPTSE", "Canada TSX"), ("^MXX", "Mexico IPC"), ("^BVSP", "Brazil Bovespa"), ("^MERV", "Argentina Merval")]),
+    ("Europe", [("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"), ("^STOXX", "Stoxx 600"), ("^FTSE", "FTSE 100"),
+                ("^FCHI", "CAC 40"), ("^SSMI", "SMI"), ("FTSEMIB.MI", "FTSE MIB"), ("^IBEX", "IBEX 35"), ("^AEX", "AEX"),
+                ("^OMX", "OMX Stockholm 30"), ("^BFX", "BEL 20"), ("^ATX", "ATX")]),
+    ("Asia-Pacific", [("^N225", "Nikkei 225"), ("^HSI", "Hang Seng"), ("000001.SS", "Shanghai Composite"), ("399001.SZ", "Shenzhen Component"),
+                      ("^KS11", "Kospi"), ("^TWII", "Taiwan TAIEX"), ("^NSEI", "India Nifty 50"), ("^BSESN", "India Sensex"),
+                      ("^AXJO", "ASX 200"), ("^NZ50", "NZX 50"), ("^STI", "Singapore STI"), ("^JKSE", "Jakarta Composite")]),
+    ("Middle East & Africa", [("^TA125.TA", "Tel Aviv 125"), ("XU100.IS", "Borsa Istanbul 100"), ("^J203.JO", "South Africa All Share")]),
     ("Futures", [("ES=F", "S&P 500 fut"), ("NQ=F", "Nasdaq fut"), ("YM=F", "Dow fut"), ("RTY=F", "Russell fut")]),
     ("Rates", [("^IRX", "US 3m"), ("^FVX", "US 5y"), ("^TNX", "US 10y"), ("^TYX", "US 30y")]),
     ("FX", [("DX-Y.NYB", "Dollar index"), ("EURUSD=X", "EUR/USD"), ("USDJPY=X", "USD/JPY"), ("GBPUSD=X", "GBP/USD"),

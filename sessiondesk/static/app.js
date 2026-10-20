@@ -24,6 +24,9 @@ const VIEWS = {
   system: () => import("./views/system.js"),
   screener: () => import("./views/screener.js"),
   hub: () => import("./views/datahub.js"),
+  sectors: () => import("./views/sectors.js"),
+  baskets: () => import("./views/baskets.js"),
+  commodities: () => import("./views/commodities.js"),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -284,7 +287,7 @@ $("menu").addEventListener("click", () => $("nav").classList.toggle("open"));
 async function loadExtensions() {
   const d = await api("/api/extensions", { fresh: true });
   document.querySelectorAll("#nav a.ext").forEach((a) => a.remove());
-  const spacer = document.querySelector("#nav .spacer");
+  const spacer = document.getElementById("extSlot");
   for (const e of d.items || []) {
     spacer.before(h("a", { href: "#/ext/" + encodeURIComponent(e.name), "data-route": "ext:" + e.name, class: "ext", title: e.error || e.description || "local extension" },
       e.title + (e.error ? " (error)" : "")));
@@ -358,7 +361,7 @@ drawTabs();
 
 // Back: the app window (--app) has no browser bar, so the desk brings its own. Only shown once there is a page to go back to.
 let depth = 0;
-window.addEventListener("hashchange", () => { depth += 1; $("back").hidden = depth < 1; });
+window.addEventListener("hashchange", () => { depth += 1; $("back").disabled = depth < 1; });
 $("back").addEventListener("click", () => { depth = Math.max(0, depth - 2); window.history.back(); });
 
 window.addEventListener("hashchange", route);

@@ -78,7 +78,8 @@ DEFAULTS: dict = {
     "jobs_files": [],                   # extra job files, imported read-only
     "jobs_python": "",                  # interpreter for "python" jobs whose file names none (default: SessionDesk's own)
     "extensions_enabled": True,         # load your own pages from <data dir>/extensions/ (see sessiondesk/extensions.py)
-    "push": {},                         # phone push (ntfy / own Telegram bot), see sessiondesk/push.py - off by default
+    "push": {},
+    "baskets": [],                      # your own baskets: {"id", "name", "members": [{"symbol", "weight"}], "benchmark"}                         # phone push (ntfy / own Telegram bot), see sessiondesk/push.py - off by default
 }
 
 ENV_ALIASES = {

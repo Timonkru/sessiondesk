@@ -124,7 +124,20 @@ export function table(columns, rows, { onRow, empty = "Nothing here yet.", rowCl
     }
     tbody.appendChild(tr);
   }
-  return h("table", { class: "grid" }, thead, tbody);
+  const t = h("table", { class: "grid" }, thead, tbody);
+  if (rows.length) t.prepend(h("caption", null, h("button", { class: "csvbtn", type: "button", title: "Download this table as CSV", onclick: () => tableCsv(t) }, "CSV")));
+  return t;
+}
+
+// CSV of exactly what a table shows (text of every cell), for any table built with table().
+export function tableCsv(t, name) {
+  const esc = (s) => (/[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const lines = [...t.querySelectorAll("tr")].map((tr) => [...tr.children].map((c) => esc(c.textContent.trim())).join(","));
+  const title = name || (document.querySelector("#view h1")?.textContent || "table").replace(/[^\w-]+/g, "_").toLowerCase();
+  const url = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }));
+  const a = h("a", { href: url, download: `${title}_${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function section(title, ...children) {

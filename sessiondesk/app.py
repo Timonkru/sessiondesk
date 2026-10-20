@@ -447,6 +447,37 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         done = {name: await fn(ctx) for name, (fn, _) in datahub.COLLECTORS.items()}
         return {"collected": done, "warnings": len(await datahub.scan(ctx))}
 
+    @app.get("/api/baskets")
+    async def get_baskets():
+        from .features import baskets
+        return {"baskets": baskets.all_baskets(C())}
+
+    @app.post("/api/baskets")
+    async def post_basket(request: Request):
+        from .features import baskets
+        body = await request.json()
+        return baskets.save(C(), body.get("name", ""), body.get("members", ""), body.get("id"), body.get("benchmark") or "SPY")
+
+    @app.get("/api/baskets/{basket_id}")
+    async def get_basket(basket_id: str):
+        from .features import baskets
+        return await baskets.view(C(), basket_id)
+
+    @app.delete("/api/baskets/{basket_id}")
+    async def delete_basket(basket_id: str):
+        from .features import baskets
+        return baskets.delete(C(), basket_id)
+
+    @app.get("/api/commodities")
+    async def get_commodities():
+        from .features import commodities
+        return await commodities.board(C())
+
+    @app.get("/api/sectors/{region}")
+    async def get_sectors(region: str):
+        from .features import sectors
+        return await sectors.performance(C(), region)
+
     @app.get("/api/universes")
     async def get_universes():
         from .features import universe

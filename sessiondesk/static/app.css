@@ -209,3 +209,20 @@ dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; text-align: right; paddi
 .netgraph .netnode.link { cursor: pointer; } .netgraph .netnode.link:hover circle { fill: var(--link); }
 .netgraph .netcenter circle { fill: var(--link); } .netgraph .netcenter text { fill: var(--bg); font-weight: 700; font-size: 14px; }
 .netgraph .netcenter .netsub { fill: var(--muted); }
+
+#nav .navsec { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 12px 18px 3px; }
+#nav a { padding: 4px 18px 4px 24px; }
+#nav .brand { padding-left: 18px; }
+.iconbtn { background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--fg); padding: 3px 10px; font-size: 15px; cursor: pointer; }
+.iconbtn:disabled { opacity: .35; cursor: default; }
+
+.heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin: 8px 0 10px; }
+.heattile { display: block; padding: 10px 10px 8px; border-radius: 6px; color: var(--fg); border: 1px solid var(--line); }
+.heattile:hover { text-decoration: none; outline: 2px solid var(--link); }
+.heattile .hn { font-size: 13px; } .heattile .hv { font-size: 18px; font-weight: 650; margin-top: 2px; }
+
+.chart-svg .line2 { fill: none; stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+table.grid caption { caption-side: top; text-align: right; height: 0; overflow: visible; }
+table.grid caption .csvbtn { position: relative; top: -2px; background: none; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; opacity: 0; padding: 0 2px; }
+table.grid:hover caption .csvbtn, table.grid caption .csvbtn:focus { opacity: 1; }
+table.grid caption .csvbtn:hover { color: var(--link); }

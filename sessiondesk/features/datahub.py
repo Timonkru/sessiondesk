@@ -157,6 +157,55 @@ async def collect_eia(ctx) -> int:
     return len(rows)
 
 
+EIA_GAS_URL = "https://ir.eia.gov/ngs/wngsr.csv"
+
+
+def parse_eia_gas(text: str) -> list[dict]:
+    """EIA Weekly Natural Gas Storage Report (Lower 48): stocks per region for this and the previous week,
+    plus the year-ago level and the 5-year average for the current week (pure, tested)."""
+    import datetime as dt
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    dates = next((r for r in rows if len(r) > 4 and r[0] == "" and r[1][:2].isdigit()), None)
+    if not dates:
+        return []
+
+    def day(s):
+        return dt.datetime.strptime(s.strip(), "%d-%b-%y").strftime("%Y-%m-%d")
+
+    def num(s):
+        try:
+            return float(s.replace(",", ""))
+        except ValueError:
+            return None
+    cur, prev = day(dates[1]), day(dates[4])
+    out = []
+    for r in rows:
+        name = r[0].strip() if r else ""
+        if name in ("East", "Midwest", "Mountain", "Pacific", "South Central", "Total") and len(r) > 20:
+            now, before = num(r[1]), num(r[4])
+            if now is None or before is None:
+                continue
+            out.append({"region": "Lower 48 total" if name == "Total" else name, "points": [(prev, before), (cur, now)],
+                        "year_ago": num(r[13]), "avg5": num(r[19])})
+    return out
+
+
+async def collect_eia_gas(ctx) -> int:
+    resp = await ctx.http.get(EIA_GAS_URL, headers={"User-Agent": "SessionDesk"}, timeout=20, follow_redirects=True)
+    if resp.status_code != 200:
+        return 0
+    rows = parse_eia_gas(resp.content.decode("utf-8", "ignore"))
+    for r in rows:
+        sid = "eiagas:" + r["region"].lower().replace(" ", "_")
+        await ctx.db.run(ctx.db.upsert_series, _meta(sid, f"US gas storage {r['region']} (Bcf)", "Gas (EIA weekly)",
+                                                     "EIA Weekly Natural Gas Storage Report", "level"), r["points"])
+        if r.get("avg5") is not None:
+            await ctx.db.run(ctx.db.upsert_series, _meta(sid + ":vs5y", f"US gas storage {r['region']} vs 5-year average (Bcf)",
+                                                         "Gas (EIA weekly)", "EIA Weekly Natural Gas Storage Report", "level"),
+                             [(r["points"][-1][0], r["points"][-1][1] - r["avg5"])])
+    return len(rows)
+
+
 async def collect_news(ctx) -> int:
     import re
     themes = {t: re.compile(assets.THEMES[t], re.I) for t in NEWS_THEMES if t in assets.THEMES}
@@ -174,7 +223,11 @@ async def collect_news(ctx) -> int:
     return len(counts)
 
 
-COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia, 6 * 3600),
+async def collect_eia_all(ctx) -> int:
+    return await collect_eia(ctx) + await collect_eia_gas(ctx)
+
+
+COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
               "news": (collect_news, 3600)}
 
 

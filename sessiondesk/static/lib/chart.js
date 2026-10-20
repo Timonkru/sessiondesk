@@ -5,12 +5,14 @@ import { svg, h } from "./ui.js";
 // The SVG is stretched horizontally; a hyphen-minus then becomes invisible. Axis labels use the real minus sign.
 const axisText = (t) => String(t).replace(/^-/, "−");
 
-export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.toFixed(2), fmtX = (x) => x, xLabels = null, area = true } = {}) {
+// extra: further series aligned with points by index, [{ values: [...], label, cls }] - drawn as thin comparison lines
+export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.toFixed(2), fmtX = (x) => x, xLabels = null, area = true, extra = [] } = {}) {
   const wrap = h("div", { class: "chart" });
   if (!points || points.length < 2) { wrap.appendChild(h("p", { class: "muted" }, "Not enough data for a chart.")); return wrap; }
   const W = 1000, H = height, padL = 8, padR = 64, padT = 10, padB = 22;
   const ys = points.map((p) => p.y);
-  let min = Math.min(...ys, ref ?? Infinity), max = Math.max(...ys, ref ?? -Infinity);
+  const extraYs = extra.flatMap((e) => e.values.filter((v) => v != null && Number.isFinite(v)));
+  let min = Math.min(...ys, ...extraYs, ref ?? Infinity), max = Math.max(...ys, ...extraYs, ref ?? -Infinity);
   const pad = (max - min) * 0.06 || Math.abs(max) * 0.01 || 1;
   min -= pad; max += pad;
   const X = (i) => padL + (i / (points.length - 1)) * (W - padL - padR);
@@ -35,6 +37,11 @@ export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.to
   if (ref !== null && ref !== undefined) root.appendChild(svg("line", { x1: padL, x2: W - padR, y1: Y(ref), y2: Y(ref), class: "refline" }));
   if (area) root.appendChild(svg("path", { d: `${line} L${X(points.length - 1)} ${H - padB} L${X(0)} ${H - padB} Z`, class: "area" }));
   root.appendChild(svg("path", { d: line, class: "line" }));
+  for (const e of extra) {
+    const d = e.values.map((v, i) => (v == null ? "" : (i && e.values[i - 1] != null ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1))).join(" ");
+    if (d.trim()) root.appendChild(svg("path", { d, class: "line2 " + (e.cls || "") }));
+  }
+  if (extra.length) wrap.appendChild(h("div", { class: "small muted" }, extra.map((e) => h("span", { class: "legend2 " + (e.cls || "") }, `- - ${e.label}  `))));
   const cross = svg("line", { y1: padT, y2: H - padB, class: "cross", visibility: "hidden" });
   const dot = svg("circle", { r: 4, class: "dot", visibility: "hidden" });
   root.append(cross, dot);
