@@ -27,6 +27,7 @@ const VIEWS = {
   stocks: () => import("./views/stocks.js"),
   alerts: () => import("./views/alerts.js"),
   desk: () => import("./views/desk.js"),
+  portfolio: () => import("./views/portfolio.js"),
   hub: () => import("./views/datahub.js"),
   sectors: () => import("./views/sectors.js"),
   baskets: () => import("./views/baskets.js"),

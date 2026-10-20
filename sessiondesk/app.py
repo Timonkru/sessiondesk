@@ -527,6 +527,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         C().settings.replace("desk", desk)
         return desk
 
+    @app.get("/api/portfolio")
+    async def get_portfolio():
+        from .features import portfolio
+        return await portfolio.view(C())
+
     @app.get("/api/tankers")
     async def get_tankers():
         from .features import tankers
