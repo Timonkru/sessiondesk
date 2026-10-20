@@ -52,3 +52,20 @@ def test_tanker_api_without_key(client):
     d = client.get("/api/tankers").json()
     assert d["configured"] is False and len(d["chokepoints"]) == len(tankers.CHOKEPOINTS)
     assert all(c["tankers"] == 0 for c in d["chokepoints"])
+
+
+def test_api_v1_key_and_csv(client):
+    from sessiondesk.features import export
+    assert export.to_csv([{"a": 1.5, "b": None, "c": -0.5199999999999818}], ("a", "b", "c")) == "a,b,c\n1.5,,-0.52\n"
+    assert client.get("/api/v1/key").json()["set"] is False
+    key = client.post("/api/v1/key").json()["key"]
+    token = client.headers.get("X-SD-Token")
+    client.headers.pop("X-SD-Token", None)
+    try:
+        assert client.get("/api/v1/series.csv?id=nope&key=wrong").status_code == 401
+        r = client.get(f"/api/v1/series.csv?id=nope&key={key}")
+        assert r.status_code == 200 and r.text == "date,value\n"
+        assert client.get(f"/api/hub?key={key}").status_code == 401              # the key opens /api/v1 only
+        assert client.post(f"/api/v1/key?key={key}").status_code == 401         # and cannot replace itself
+    finally:
+        client.headers["X-SD-Token"] = token

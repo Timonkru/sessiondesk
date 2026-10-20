@@ -207,7 +207,34 @@ export async function render(root, _params, ctx) {
       h("button", { onclick: async () => { await patch({ extensions_enabled: extOn.checked }); const d = await api("/api/extensions/reload", { method: "POST" }); drawExt(d); window.dispatchEvent(new Event("sd:extensions")); toast("Extensions reloaded", ""); } }, "Save & reload")));
   api("/api/extensions", { fresh: true }).then(drawExt);
 
-  clear(body, aiSection, connSection, alertSection, pushSection, adv, feedsSection, extSection, privacy);
+  // ---------------------------------------------------------------- spreadsheets & scripts (/api/v1 with an API key)
+  const apiBox = h("div");
+  const base = location.origin;
+  const drawApi = (state, fresh) => {
+    const key = fresh || "YOUR_KEY";
+    const ex = [
+      ["Excel / LibreOffice, one value", `=WEBSERVICE("${base}/api/v1/value?symbol=AAPL&field=price&key=${key}")`],
+      ["Change today in %", `=WEBSERVICE("${base}/api/v1/value?symbol=^GDAXI&field=change_pct&key=${key}")`],
+      ["A Data hub series (latest value)", `=WEBSERVICE("${base}/api/v1/value?symbol=hub:fred:DGS10&key=${key}")`],
+      ["Power Query / From Web: quotes table", `${base}/api/v1/quotes.csv?symbols=AAPL,MSFT,SAP.DE&key=${key}`],
+      ["Daily history", `${base}/api/v1/history.csv?symbol=AAPL&range=1y&key=${key}`],
+      ["A whole index with all measures", `${base}/api/v1/stocks.csv?scope=index:dax40&key=${key}`],
+      ["A Data hub series with history", `${base}/api/v1/series.csv?id=eia:crude_oil_stocks_excl_spr&key=${key}`],
+    ];
+    clear(apiBox,
+      fresh ? h("p", { class: "warn" }, "Your new key (shown once - copy it now): ", h("code", null, fresh)) :
+        h("p", { class: "small" }, state.set ? `A key is set (${state.hint}).` : "No key yet."),
+      h("div", { class: "toolbar" }, h("button", { onclick: async () => {
+        if (state.set && !confirm("Create a new key? Formulas with the old key stop working.")) return;
+        const r = await api("/api/v1/key", { method: "POST" }); drawApi({ set: true, hint: "…" + r.key.slice(-4) }, r.key);
+      } }, state.set ? "Replace key" : "Create key")),
+      table([{ label: "Use", render: (r) => r[0] }, { label: "Formula / address", render: (r) => h("code", { class: "small" }, r[1]) }], ex),
+      note("Read-only, and only on this computer: Excel and LibreOffice on this PC can call it, Google Sheets cannot (it fetches from Google's servers, which cannot reach your SessionDesk - on purpose). The port changes if you start SessionDesk on another port. =WEBSERVICE needs Excel for Windows."));
+  };
+  api("/api/v1/key", { fresh: true }).then((st) => drawApi(st || {}));
+  const apiSection = section("Spreadsheets & scripts", apiBox);
+
+  clear(body, aiSection, connSection, alertSection, pushSection, adv, feedsSection, extSection, apiSection, privacy);
 }
 
 function connectorRow(it) {

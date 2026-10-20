@@ -1,5 +1,6 @@
 // Shell: router, command bar (stock search or AI question), AI drawer, event countdown, push notifications.
 import { api, connect, on, streamChat } from "./lib/api.js";
+import { parseCommand } from "./lib/commands.js";
 import { h, clear, toast, notify, beep, markdown, countdown, errorBox } from "./lib/ui.js";
 
 const VIEWS = {
@@ -80,13 +81,15 @@ async function route() {
 
 // ------------------------------------------------------------------ command bar
 const input = $("cmdInput"), list = $("cmdList");
-let results = [], sel = -1, searchTimer = null;
+let results = [], sel = -1, searchTimer = null, cmd = null;
 
 function looksLikeTicker(q) { return /^[\^]?[A-Za-z0-9]{1,6}([.=\-][A-Za-z0-9]{1,4})?$/.test(q.trim()); }
 
 function renderList() {
   clear(list);
-  list.hidden = !results.length;
+  list.hidden = !results.length && !cmd;
+  if (cmd) list.appendChild(h("div", { class: "cmdrow" + (sel === -1 ? " sel" : ""), onmousedown: (e) => { e.preventDefault(); runCmd(); } },
+    h("span", { class: "sym" }, "⏎"), h("span", null, cmd.label), h("span", { class: "muted" }, "command")));
   results.forEach((r, i) => {
     list.appendChild(h("div", { class: i === sel ? "sel" : "", onmousedown: (e) => { e.preventDefault(); pick(i); } },
       h("span", { class: "sym" }, r.symbol), h("span", null, r.name || ""), h("span", { class: "muted" }, r.exchange || "")));
@@ -105,6 +108,12 @@ function pick(i) {
   ctx.go("#/stock/" + encodeURIComponent(r.symbol));
 }
 
+function runCmd() {
+  const c = cmd;
+  input.value = ""; results = []; cmd = null; renderList(); input.blur();
+  if (c) ctx.go(c.href);
+}
+
 function askFromBar() {
   const q = input.value.trim().replace(/^\?\s*/, "");
   input.value = ""; results = []; renderList(); input.blur();
@@ -115,6 +124,8 @@ input.addEventListener("input", () => {
   clearTimeout(searchTimer);
   const q = input.value.trim();
   sel = -1;
+  cmd = parseCommand(q);
+  if (cmd) renderList();
   if (!q || q.startsWith("?") || q.split(/\s+/).length > 3) { results = []; renderList(); return; }
   searchTimer = setTimeout(async () => {
     const d = await api("/api/search?q=" + encodeURIComponent(q), { ttl: 60000 });
@@ -127,11 +138,12 @@ input.addEventListener("keydown", (e) => {
   const max = results.length + (input.value.trim() && !looksLikeTicker(input.value) ? 1 : 0);
   if (e.key === "ArrowDown") { sel = Math.min(max - 1, sel + 1); renderList(); e.preventDefault(); }
   else if (e.key === "ArrowUp") { sel = Math.max(-1, sel - 1); renderList(); e.preventDefault(); }
-  else if (e.key === "Escape") { input.value = ""; results = []; renderList(); input.blur(); }
+  else if (e.key === "Escape") { input.value = ""; results = []; cmd = null; renderList(); input.blur(); }
   else if (e.key === "Enter") {
     e.preventDefault();
     const q = input.value.trim();
-    if (sel >= 0 && sel < results.length) pick(sel);
+    if (sel === -1 && cmd) runCmd();
+    else if (sel >= 0 && sel < results.length) pick(sel);
     else if (sel === results.length && max > results.length) askFromBar();
     else if (q.startsWith("?")) askFromBar();
     else if (looksLikeTicker(q)) { input.value = ""; results = []; renderList(); ctx.go("#/stock/" + encodeURIComponent(q.toUpperCase())); }

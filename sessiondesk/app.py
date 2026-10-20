@@ -7,6 +7,8 @@ Security model (local app):
     open in the same browser cannot call the API (they cannot read the page, and a custom header
     forces a CORS preflight that this server never approves)
   - the Host header must be a local name (blocks DNS-rebinding), extendable via SESSIONDESK_ALLOWED_HOSTS
+  - /api/v1/* (read-only data for spreadsheets and scripts) also accepts the user's API key (?key= or header
+    X-SD-Key), created in Settings; creating or replacing that key needs the session token
   - keys entered in the UI are stored locally and never sent back to the browser
 """
 from __future__ import annotations
@@ -107,7 +109,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return JSONResponse({"error": "host not allowed"}, status_code=403)
         if request.url.path.startswith("/api/"):
             sent = request.headers.get("x-sd-token") or request.query_params.get("t") or ""
-            if not pysecrets.compare_digest(sent, token):
+            key = request.headers.get("x-sd-key") or request.query_params.get("key") or ""
+            api_key = state["ctx"].secrets.get("api.key") if "ctx" in state else None
+            by_key = (request.url.path.startswith("/api/v1/") and request.url.path != "/api/v1/key" and request.method == "GET"
+                      and bool(api_key) and pysecrets.compare_digest(key, api_key))
+            if not by_key and not pysecrets.compare_digest(sent, token):
                 return JSONResponse({"error": "missing or wrong session token - reload the page"}, status_code=401)
         response = await call_next(request)
         if request.url.path.startswith("/static/"):
@@ -522,6 +528,46 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         ctx.settings.replace("universes", keys)
         ctx.cache.invalidate("movers")
         return await get_universes()
+
+    # ------------------------------------------------------------------ read-only API for spreadsheets / scripts (/api/v1)
+    @app.get("/api/v1/key")
+    async def api_key_state():
+        return C().secrets.describe("api.key")
+
+    @app.post("/api/v1/key")
+    async def api_key_new():
+        key = pysecrets.token_urlsafe(18)
+        C().secrets.set("api.key", key)
+        return {"key": key, "note": "Shown once - copy it now. Creating a new key makes the old one stop working."}
+
+    @app.get("/api/v1/value")
+    async def api_value(symbol: str, field: str = "price"):
+        from .features import export
+        return Response(await export.value(C(), symbol, field), media_type="text/plain")
+
+    @app.get("/api/v1/quotes.csv")
+    async def api_quotes_csv(symbols: str):
+        from .features import export
+        syms = [s.strip() for s in symbols.split(",") if s.strip()][:200]
+        return Response(export.to_csv(await export.quotes(C(), syms), ("symbol",) + export.QUOTE_FIELDS), media_type="text/csv")
+
+    @app.get("/api/v1/history.csv")
+    async def api_history_csv(symbol: str, range: str = "1y"):
+        from .features import export
+        return Response(export.to_csv(await export.history(C(), symbol, range), ("date", "open", "high", "low", "close", "volume")),
+                        media_type="text/csv")
+
+    @app.get("/api/v1/series.csv")
+    async def api_series_csv(id: str):
+        from .features import export
+        pts = await C().db.run(C().db.observations, id, 100000)
+        return Response(export.to_csv([{"date": d, "value": v} for d, v in pts], ("date", "value")), media_type="text/csv")
+
+    @app.get("/api/v1/stocks.csv")
+    async def api_stocks_csv(scope: str = "all"):
+        from .features import export, stocklist
+        d = await stocklist.stocks(C(), scope)
+        return Response(export.to_csv(d["rows"], export.STOCK_FIELDS), media_type="text/csv")
 
     @app.get("/api/stocks")
     async def get_stocks(scope: str = "all", group: str | None = None, industry: str | None = None):

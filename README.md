@@ -88,6 +88,39 @@ a systemd user service.
 Settings, keys, cache, the news archive and job logs live in `~/.sessiondesk/` (override with
 `SESSIONDESK_HOME`).
 
+## Command bar
+
+Type in the search bar (or press `/`). Besides names and symbols it understands short commands; the
+first line of the list shows where a command goes, Enter runs it.
+
+| Type | Goes to |
+|---|---|
+| `AAPL DES` / `OV` | overview of the instrument (`GP` / `CHART` too) |
+| `AAPL FA` · `EE` · `ANR` · `RV` · `HDS` | financial statements · earnings history · estimates & analysts · valuation · ownership |
+| `AAPL OPT` (`OMON`, `OVDV`) · `PERF` · `COMP` · `MGMT` · `SPLC` · `DVD` · `CN` · `FIL` | options · performance & risk · peers · people & indices · network · dividends · news · SEC filings |
+| `AAPL HUB` | the instrument's series in the Data hub |
+| `DAX MEMBERS`, `NKY BREADTH`, `SPX DRIVERS` | an index's members or its breadth, drivers & valuation (`SPX`, `NDX`, `INDU`, `TSX`, `DAX`, `UKX`, `CAC`, `SMI`, `SX5E`, `MIB`, `IBEX`, `AEX`, `NKY`, `HSI`, `AS51`) |
+| `TOP` · `WEI` · `ECO` · `FLOW` · `IDX` · `SECT` · `EQS` · `MOST` · `BSKT` · `HUB` · `ECST` · `CMDTY` · `TANK` · `ALRT` · `DESK` · `PORT` · `JRNL` | news · markets · calendar · forced flows · indices · sectors · stocks · movers · baskets · data hub · macro · commodities · tankers · alerts · my desk · portfolio · journal |
+
+Words that are also common tickers (MOV, MAC, CAL, RES ...) stay stock searches.
+
+## Spreadsheets and scripts
+
+Excel or LibreOffice on the same computer can pull values straight from SessionDesk. Create a key under
+**Settings → Spreadsheets & scripts** (shown once; a new key replaces the old one), then for example:
+
+```
+=WEBSERVICE("http://127.0.0.1:8765/api/v1/value?symbol=AAPL&field=price&key=YOUR_KEY")
+=WEBSERVICE("http://127.0.0.1:8765/api/v1/value?symbol=hub:fred:DGS10&key=YOUR_KEY")
+```
+
+Power Query (Data → From Web) or scripts read CSV: `/api/v1/quotes.csv?symbols=AAPL,SAP.DE`,
+`/api/v1/history.csv?symbol=AAPL&range=1y` (daily bars), `/api/v1/series.csv?id=<Data hub id>`,
+`/api/v1/stocks.csv?scope=index:dax40` (all measures of an index's members). Fields for `value`: `price`,
+`change`, `change_pct`, `prev_close`, `time`; `hub:<id>` gives a Data hub series' latest value (`field=date` its date).
+The key opens these read-only addresses and nothing else. Google Sheets cannot use them: Sheets fetches
+from Google's servers, which cannot reach a SessionDesk on your computer - on purpose.
+
 ## Free core and bring-your-own-key connectors
 
 | Connector | Tier | Gives you |
