@@ -5,6 +5,8 @@ Descriptive context, not timing tools - each block states its source and sample.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import datetime as dt
 import math
 
@@ -213,3 +215,139 @@ async def credit(ctx) -> dict:
                         "not today's move. Daily spreads need a paid source."}
     out["euro"] = await ctx.cache.get("macro:euro10y", 12 * 3600, build_euro, disk=True)
     return out
+
+
+# ------------------------------------------------------------------ inflation & growth by country (free official sources)
+EUROSTAT = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/"
+EU_GEOS = [("EA", "Euro area"), ("DE", "Germany"), ("FR", "France"), ("IT", "Italy"), ("ES", "Spain")]
+# Eurostat queries per indicator; the euro area code differs by dataset (EA = changing composition, EA21 since 2026)
+EU_QUERIES = {
+    "cpi": ("prc_hicp_minr", {"unit": "RCH_A", "coicop18": "TOTAL"}, {"EA": "EA"}),
+    "core": ("prc_hicp_minr", {"unit": "RCH_A", "coicop18": "TOT_X_NRG_FOOD"}, {"EA": "EA"}),
+    "unemployment": ("une_rt_m", {"s_adj": "SA", "age": "TOTAL", "sex": "T", "unit": "PC_ACT"}, {"EA": "EA21"}),
+    "gdp": ("namq_10_gdp", {"unit": "CLV_PCH_PRE", "s_adj": "SCA", "na_item": "B1GQ"}, {"EA": "EA"}),
+}
+ONS = "https://www.ons.gov.uk/generator"
+UK_SERIES = {"cpi": "/economy/inflationandpriceindices/timeseries/d7g7/mm23",
+             "core": "/economy/inflationandpriceindices/timeseries/dko8/mm23",
+             "unemployment": "/employmentandlabourmarket/peoplenotinwork/unemployment/timeseries/mgsx/lms",
+             "gdp": "/economy/grossdomesticproductgdp/timeseries/ihyq/qna"}
+FRED_COUNTRY = {   # (country, indicator): (FRED id, transform)
+    ("United States", "cpi"): ("CPIAUCSL", "yoy12"), ("United States", "core"): ("CPILFESL", "yoy12"),
+    ("United States", "unemployment"): ("UNRATE", "level"), ("United States", "gdp"): ("GDPC1", "mom"),
+    ("Japan", "unemployment"): ("LRHUTTTTJPM156S", "level"), ("Japan", "gdp"): ("JPNRGDPEXP", "mom"),
+}
+INDICATORS = [("cpi", "Inflation, % y/y"), ("core", "Core inflation, % y/y (ex energy, food, alcohol, tobacco)"),
+              ("unemployment", "Unemployment rate, %"), ("gdp", "Real GDP, % q/q (not annualised)")]
+COUNTRIES = ["United States", "Euro area", "Germany", "France", "Italy", "Spain", "United Kingdom", "Japan"]
+
+
+def parse_jsonstat(d: dict) -> dict[str, list[tuple[str, float]]]:
+    """Eurostat JSON-stat 2.0 with one value per geo and period (all other dimensions fixed) -> {geo: [(period, value)]}
+    (pure, tested)."""
+    dims, size = d["id"], d["size"]
+    index = {k: d["dimension"][k]["category"]["index"] for k in dims}
+    geos = sorted(index["geo"], key=index["geo"].get)
+    times = sorted(index["time"], key=index["time"].get)
+    out = {}
+    for g in geos:
+        pts = []
+        for t in times:
+            n = 0
+            for k, s in zip(dims, size):
+                n = n * s + (index[k][g] if k == "geo" else index[k][t] if k == "time" else 0)
+            v = d.get("value", {}).get(str(n))
+            if v is not None:
+                pts.append((t, float(v)))
+        out[g] = pts
+    return out
+
+
+def parse_ons_csv(text: str) -> list[tuple[str, float]]:
+    """ONS time-series CSV -> monthly ("2026 AUG") or quarterly ("2026 Q2") points; annual rows are skipped (pure, tested)."""
+    months = {m: i + 1 for i, m in enumerate(["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
+    out = []
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) < 2:
+            continue
+        parts = row[0].split()
+        try:
+            v = float(row[1])
+        except ValueError:
+            continue
+        if len(parts) == 2 and parts[0].isdigit() and parts[1] in months:
+            out.append((f"{parts[0]}-{months[parts[1]]:02d}", v))
+        elif len(parts) == 2 and parts[0].isdigit() and parts[1] in ("Q1", "Q2", "Q3", "Q4"):
+            out.append((f"{parts[0]}-{parts[1]}", v))
+    return out
+
+
+def _cell(points: list[tuple[str, float]], source: str, url: str) -> dict | None:
+    if not points:
+        return None
+    return {"period": points[-1][0], "value": points[-1][1], "prev": points[-2][1] if len(points) > 1 else None,
+            "source": source, "url": url}
+
+
+async def international(ctx) -> dict:
+    fred = ctx.hub.get("fred")
+
+    async def eurostat(key):
+        dataset, params, rename = EU_QUERIES[key]
+        geos = [rename.get(g, g) for g, _ in EU_GEOS]
+        q = [*params.items(), *(("geo", g) for g in geos), ("lastTimePeriod", "6")]
+        resp = await ctx.http.get(EUROSTAT + dataset, params=q, timeout=40)
+        if resp.status_code != 200:
+            return key, {}
+        data = parse_jsonstat(resp.json())
+        back = {v: k for k, v in rename.items()}
+        return key, {back.get(g, g): pts for g, pts in data.items()}
+
+    async def ons(key):
+        resp = await ctx.http.get(ONS, params={"format": "csv", "uri": UK_SERIES[key]}, headers={"User-Agent": "Mozilla/5.0 (SessionDesk)"},
+                                  timeout=30, follow_redirects=True)
+        return key, parse_ons_csv(resp.text) if resp.status_code == 200 else []
+
+    async def fred_cell(country, key):
+        sid, how = FRED_COUNTRY[(country, key)]
+        r = await fred.series(sid)
+        pts = r["points"]
+        vals = []
+        for i in range(max(1, len(pts) - 6), len(pts)):         # transformed tail, so prev is comparable
+            t = transform(pts[: i + 1], how)
+            if t:
+                day = pts[i][0]                                         # FRED dates periods by their first day
+                period = f"{day[:4]}-Q{(int(day[5:7]) - 1) // 3 + 1}" if key == "gdp" else day[:7]
+                vals.append((period, t["value"]))
+        return country, key, vals, sid
+
+    async def build():
+        eu, uk, fr = await asyncio.gather(
+            asyncio.gather(*(eurostat(k) for k in EU_QUERIES), return_exceptions=True),
+            asyncio.gather(*(ons(k) for k in UK_SERIES), return_exceptions=True),
+            asyncio.gather(*(fred_cell(c, k) for c, k in FRED_COUNTRY), return_exceptions=True))
+        table = {c: {} for c in COUNTRIES}
+        names = dict(EU_GEOS)
+        for res in eu:
+            if isinstance(res, Exception):
+                continue
+            key, data = res
+            dataset = EU_QUERIES[key][0]
+            for g, pts in data.items():
+                table[names[g]][key] = _cell(pts, f"Eurostat {dataset}", f"https://ec.europa.eu/eurostat/databrowser/view/{dataset}/default/table")
+        for res in uk:
+            if not isinstance(res, Exception):
+                key, pts = res
+                table["United Kingdom"][key] = _cell(pts, "ONS", "https://www.ons.gov.uk" + UK_SERIES[key])
+        for res in fr:
+            if not isinstance(res, Exception):
+                country, key, pts, sid = res
+                table[country][key] = _cell(pts, f"FRED {sid}", "https://fred.stlouisfed.org/series/" + sid)
+        if not any(v for row in table.values() for v in row.values()):
+            return {"error": "no international data"}
+        return {"countries": COUNTRIES, "indicators": [{"key": k, "label": label} for k, label in INDICATORS], "table": table,
+                "note": "Latest official figure per country with its period (the release lags the period). Euro area = Eurostat "
+                        "(EA21 for unemployment since Bulgaria joined in 2026), UK = ONS, US and Japan = FRED. US GDP is the "
+                        "real quarterly change, not the annualised rate the US headlines use. Japan's CPI has no free source "
+                        "without a key (e-Stat), so it stays empty."}
+    return await ctx.cache.get("macro:international:v2", 12 * 3600, build, disk=True)

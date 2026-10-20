@@ -7,10 +7,10 @@ import { h, clear, table, section, num, pct, signed, dir, note, loading, errorBo
 
 export async function render(root, _params, ctx) {
   const mk = () => h("div", null, loading());
-  const rates = mk(), fed = mk(), vol = mk(), risk = mk(), pc = mk(), cot = mk(), growth = mk(), credit = mk(), euro = mk();
+  const rates = mk(), fed = mk(), vol = mk(), risk = mk(), pc = mk(), cot = mk(), growth = mk(), credit = mk(), euro = mk(), intl = mk();
   const TABS = [
     ["rates", "Rates", h("div", { class: "cols" }, section("US Treasury curve", rates), section("Fed funds path (futures)", fed))],
-    ["growth", "Inflation & growth", section(null, growth)],
+    ["growth", "Inflation & growth", h("div", null, section("By country", intl), section("United States in detail", growth))],
     ["credit", "Credit & liquidity", h("div", { class: "cols" }, section("US credit and liquidity", credit), section("Euro area: 10-year yields and spreads to Germany", euro))],
     ["risk", "Volatility & risk", h("div", { class: "cols" }, h("div", null, section("Volatility", vol), section("Put/call (SPY, QQQ options)", pc)), section("Risk appetite", risk))],
     ["pos", "Positioning", section("Positioning (COT)", cot)],
@@ -47,6 +47,22 @@ export async function render(root, _params, ctx) {
     if (g.error) { clear(growth, errorBox(g.error)); return; }
     facts.inflation_growth = g.rows;
     clear(growth, fredTable(g.rows, fmtVal), note(`${g.source}. Changes are against the previous release of each series.`));
+    push();
+  });
+  api("/api/macro/international", { ttl: 600000 }).then((d) => {
+    if (d.error) { clear(intl, errorBox(d.error)); return; }
+    facts.inflation_growth_by_country = d.table;
+    const cell = (c, k) => {
+      const x = (d.table[c] || {})[k];
+      if (!x) return h("span", { class: "muted" }, "–");
+      const chg = x.prev != null ? x.value - x.prev : null;
+      return h("a", { href: x.url, target: "_blank", rel: "noopener noreferrer", title: `${x.source} · ${x.period}` + (x.prev != null ? ` · before ${num(x.prev, 1)}` : ""),
+        style: { color: "inherit" } }, num(x.value, 1), h("span", { class: "small muted" }, ` ${x.period.slice(2)}`),
+        chg ? h("span", { class: "small muted" }, chg > 0 ? " ▲" : " ▼") : null);
+    };
+    clear(intl, h("div", { class: "scroll" }, table([{ label: "", render: (i) => i.label },
+      ...d.countries.map((c) => ({ label: c, num: true, render: (i) => cell(c, i.key) }))], d.indicators)),
+      note(d.note + " Each number links to its source; ▲/▼ = up or down against the release before."));
     push();
   });
   api("/api/macro/credit", { ttl: 600000 }).then((x) => {

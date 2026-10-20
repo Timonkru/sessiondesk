@@ -22,3 +22,14 @@ def test_transforms():
     assert macro.transform(_pts([4.1, 4.2]), "level")["change"] == pytest.approx(0.1)
     assert macro.transform(_pts([1.0]), "level") is None
     assert macro.transform(_pts([100.0, 101.0]), "yoy12") is None  # not a year of data
+
+
+def test_parse_jsonstat_and_ons():
+    from sessiondesk.features import macro as m
+    d = {"id": ["freq", "unit", "geo", "time"], "size": [1, 1, 2, 2],
+         "dimension": {"freq": {"category": {"index": {"M": 0}}}, "unit": {"category": {"index": {"RCH_A": 0}}},
+                       "geo": {"category": {"index": {"DE": 0, "EA": 1}}}, "time": {"category": {"index": {"2026-08": 0, "2026-09": 1}}}},
+         "value": {"0": 2.1, "1": 2.3, "2": 2.0}}                 # EA 2026-09 missing
+    assert m.parse_jsonstat(d) == {"DE": [("2026-08", 2.1), ("2026-09", 2.3)], "EA": [("2026-08", 2.0)]}
+    text = '"Title","CPI"\n"CDID","D7G7"\n"2025","3.2"\n"2026 Q2","0.5"\n"2026 JUL","2.9"\n"2026 AUG","3.1"\n'
+    assert m.parse_ons_csv(text) == [("2026-Q2", 0.5), ("2026-07", 2.9), ("2026-08", 3.1)]
