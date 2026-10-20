@@ -6,7 +6,7 @@ import { stockTable, crumbs } from "../lib/stocktable.js";
 
 export async function render(root, params, ctx) {
   const uni = (await api("/api/universes", { ttl: 600000 })).items || [];
-  const scopes = [["all", "All"], ["region:us", "United States"], ["region:eu", "Europe"], ...uni.map((u) => ["index:" + u.key, u.name])];
+  const scopes = [["all", "All"], ["region:us", "United States"], ["region:ca", "Canada"], ["region:eu", "Europe"], ["region:asia", "Asia-Pacific"], ...uni.map((u) => ["index:" + u.key, u.name])];
   let scope = params[0] ? decodeURIComponent(params[0]) : localStorage.getItem("sd.stocksScope") || "all";
   if (uni.some((u) => u.key === scope)) scope = "index:" + scope;                 // old #/screener/<key> links
   if (!scopes.some(([k]) => k === scope)) scope = "all";

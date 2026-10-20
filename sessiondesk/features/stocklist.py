@@ -12,7 +12,9 @@ from .screener import screen
 from .sectors import canonical_sector
 
 REGIONS = {"us": ("United States", ["sp500", "nasdaq100", "dow30"]),
-           "eu": ("Europe", ["stoxx50", "dax40", "cac40", "ftse100", "smi"])}
+           "eu": ("Europe", ["stoxx50", "dax40", "cac40", "ftse100", "smi", "ftsemib", "ibex35", "aex25"]),
+           "ca": ("Canada", ["tsx60"]),
+           "asia": ("Asia-Pacific", ["nikkei225", "hsi", "asx200"])}
 GROUP_LABELS = {"technology": "Technology", "communication": "Communication", "discretionary": "Consumer discretionary",
                 "staples": "Consumer staples", "financials": "Financials", "health": "Health care", "industrials": "Industrials",
                 "energy": "Energy", "materials": "Materials", "utilities": "Utilities", "real_estate": "Real estate"}

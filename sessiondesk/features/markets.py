@@ -8,7 +8,7 @@ from __future__ import annotations
 
 OVERVIEW: list[tuple[str, list[tuple[str, str]]]] = [
     ("Americas", [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^DJI", "Dow Jones"), ("^RUT", "Russell 2000"),
-                  ("^GSPTSE", "Canada TSX"), ("^MXX", "Mexico IPC"), ("^BVSP", "Brazil Bovespa"), ("^MERV", "Argentina Merval")]),
+                  ("^GSPTSE", "Canada TSX"), ("XIU.TO", "Canada TSX 60 (XIU ETF)"), ("^MXX", "Mexico IPC"), ("^BVSP", "Brazil Bovespa"), ("^MERV", "Argentina Merval")]),
     ("Europe", [("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"), ("^STOXX", "Stoxx 600"), ("^FTSE", "FTSE 100"),
                 ("^FCHI", "CAC 40"), ("^SSMI", "SMI"), ("FTSEMIB.MI", "FTSE MIB"), ("^IBEX", "IBEX 35"), ("^AEX", "AEX"),
                 ("^OMX", "OMX Stockholm 30"), ("^BFX", "BEL 20"), ("^ATX", "ATX")]),

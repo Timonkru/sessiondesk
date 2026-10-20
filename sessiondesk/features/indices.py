@@ -24,6 +24,10 @@ from . import universe
 
 INDEX_SYMBOL = universe.BENCHMARK            # every bundled universe has its index
 PRICE_WEIGHTED = {"dow30"}
+# Price-weighted with price adjustment factors that are not in free data (Nikkei 225): neither the Dow divisor logic
+# nor market-cap weights describe it, so its drivers are plain movers and there is no bottom-up valuation.
+UNWEIGHTED = {"nikkei225"}
+NO_PROFILES = {"sp500", "nikkei225", "asx200"}      # too many members for the free profile source
 MIN_PE, MAX_PE = 1.0, 400.0
 
 
@@ -315,14 +319,14 @@ async def index_view(ctx, key: str) -> dict:
         return {"error": "not enough member history"}
     from .valuation import profile
     profiles = []
-    if key != "sp500":                                    # 500 profiles are too slow for the free source; FactSet covers it
+    if key not in NO_PROFILES and key not in UNWEIGHTED:  # hundreds of profiles are too slow for the free source
         res = await asyncio.gather(*(profile(ctx, s) for s in members))
         profiles = [{**p, "symbol": s} for s, p in zip(members, res) if "error" not in p]
     caps = class_caps(profiles)
     profiles = [{**p, "market_cap": caps.get(p["symbol"], p.get("market_cap"))} for p in profiles]
     b.pop("rows")
     pw = key in PRICE_WEIGHTED
-    by_period = {name: driver_block(period_rows(closes, k), caps, pw, idx, k) for name, k in PERIODS.items()}
+    by_period = {name: driver_block(period_rows(closes, k), {} if key in UNWEIGHTED else caps, pw, idx, k) for name, k in PERIODS.items()}
     today_block = by_period["1d"]
     val = aggregate_pe(profiles, key in PRICE_WEIGHTED) if profiles else None
     if val:
@@ -334,6 +338,15 @@ async def index_view(ctx, key: str) -> dict:
            "note": "Breadth and the breadth line use one year of daily closes (free data, refreshed hourly, today's value live). "
                    "Contributions for cap-weighted indices are approximations from today's market caps (over a week or a month "
                    "the true weights drift a little)."}
+    if key in UNWEIGHTED:
+        out["drivers_note"] = ("The Nikkei 225 is price-weighted with price adjustment factors that are not in free data, so "
+                               "neither points nor weights can be computed honestly here: these are the biggest movers, unweighted.")
+    if not val and key != "sp500":
+        out["valuation_note"] = ("No bottom-up valuation: the Nikkei 225 is not cap-weighted." if key in UNWEIGHTED else
+                                 "No bottom-up valuation: too many members for the free company-profile source." if key in NO_PROFILES else
+                                 "No member profiles yet - valuation appears once the profiles are cached (background refresh hourly).")
+    if key == "tsx60":
+        out["note"] += " The S&P/TSX 60 has no free index quote: the iShares S&P/TSX 60 ETF (XIU) stands in for the index line."
     if key == "sp500":
         out["factset"] = await factset(ctx)
     return out

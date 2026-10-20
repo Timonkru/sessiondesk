@@ -507,7 +507,8 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def get_universes():
         from .features import universe
         ctx = C()
-        return {"items": [{"key": k, "name": v, "members": len(universe.members(k)), "symbol": universe.BENCHMARK.get(k)}
+        return {"items": [{"key": k, "name": v, "members": len(universe.members(k)), "symbol": universe.BENCHMARK.get(k),
+                           "region": universe.REGION.get(k, "Europe")}
                           for k, v in universe.UNIVERSES.items()],
                 "scan": [u for u in (ctx.settings.get("universes") or []) if u in universe.UNIVERSES]}
 

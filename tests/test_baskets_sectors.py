@@ -102,7 +102,7 @@ def test_stocklist_scopes_and_merge():
     from sessiondesk.features import stocklist
     assert stocklist.scope_universes("index:dax40") == ("DAX 40", ["dax40"])
     assert stocklist.scope_universes("region:us")[1] == ["sp500", "nasdaq100", "dow30"]
-    assert len(stocklist.scope_universes("nonsense")[1]) == 8
+    assert len(stocklist.scope_universes("nonsense")[1]) == 15
     rows = stocklist.merge({"stoxx50": [{"symbol": "SIE.DE", "name": "Siemens", "sector": "Industrials", "industry": "", "chg1d": 1.0}],
                             "dax40": [{"symbol": "SIE.DE", "name": "Siemens", "sector": "Industrials", "industry": "", "chg1d": 1.0},
                                       {"symbol": "BMW.DE", "name": "BMW", "sector": "Automotive", "industry": "", "chg1d": -1.0}]})

@@ -1,7 +1,10 @@
 """Refresh the bundled index member lists from Wikipedia.
 
-Run from the repo root:  python scripts/update_universes.py
+Run from the repo root:  python scripts/update_universes.py            (all lists)
+                         python scripts/update_universes.py hsi aex     (only these)
 Needs pandas + lxml (dev only; the app reads the CSVs with the standard library).
+Sources: Wikipedia; the Nikkei 225 from Nikkei's own component page; Hang Seng sectors from Yahoo's search
+(Wikipedia only gives the four sub-indices there).
 Index providers rebalance quarterly - re-run after March/June/September/December reviews.
 """
 from __future__ import annotations
@@ -44,18 +47,18 @@ def rows_of(name: str) -> list[dict]:
     return list(csv.DictReader(lines))
 
 
-def write(name: str, rows: list[dict]) -> None:
+def write(name: str, rows: list[dict], source: str = "Wikipedia") -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{name}.csv"
     with path.open("w", newline="", encoding="utf-8") as fh:
-        fh.write(f"# source: Wikipedia, fetched {dt.date.today().isoformat()} - re-run scripts/update_universes.py after index reviews\n")
+        fh.write(f"# source: {source}, fetched {dt.date.today().isoformat()} - re-run scripts/update_universes.py after index reviews\n")
         w = csv.DictWriter(fh, fieldnames=["symbol", "name", "sector", "industry"])
         w.writeheader()
         w.writerows(rows)
     print(f"{name}: {len(rows)} members -> {path}")
 
 
-def main() -> int:
+def original_lists() -> None:
     sp = pick(tables("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"), "Symbol", "GICS Sector")
     write("sp500", [{"symbol": str(r[col(sp, "Symbol")]).replace(".", "-"), "name": r[col(sp, "Security")],
                      "sector": r[col(sp, "GICS Sector")], "industry": r[col(sp, "Sub-Industry")]} for _, r in sp.iterrows()])
@@ -100,6 +103,88 @@ def main() -> int:
     sp = {r["symbol"]: r for r in rows_of("sp500")}
     write("dow30", [{"symbol": t, "name": sp.get(t, {}).get("name", t), "sector": sp.get(t, {}).get("sector", ""),
                      "industry": sp.get(t, {}).get("industry", "")} for t in DOW30])
+
+
+# ------------------------------------------------------------------ lists added 2026-10-20
+def html(url: str) -> str:
+    return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30).read().decode("utf-8")
+
+
+def yahoo_sector(symbol: str) -> tuple[str, str]:
+    """Sector and industry from Yahoo's search (unofficial endpoint; dev-time only, one call per symbol, spaced out)."""
+    import json
+    import time
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}&quotesCount=3&newsCount=0"
+    try:
+        data = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=20).read())
+    except Exception:
+        return "", ""
+    finally:
+        time.sleep(0.6)
+    q = next((x for x in data.get("quotes", []) if x.get("symbol") == symbol), {})
+    return q.get("sector") or "", q.get("industry") or ""
+
+
+def nikkei225() -> None:
+    """Nikkei's component page: one table per Nikkei industry (36), codes as on the Tokyo exchange."""
+    import re
+    from html import unescape
+    page = html("https://indexes.nikkei.co.jp/en/nkave/index/component?idx=nk225")
+    rows = []
+    for sector, body in re.findall(r'<h3 class="idx-section-subheading">\s*([^<]+?)\s*</h3>\s*<table.*?<tbody>(.*?)</tbody>', page, re.S):
+        for code, name in re.findall(r"<tr[^>]*>\s*<td[^>]*>\s*([0-9A-Z]{4})\s*</td>\s*<td[^>]*>(.*?)</td>", body, re.S):
+            rows.append({"symbol": code + ".T", "name": unescape(re.sub(r"<[^>]+>", "", name)).strip().title(),
+                         "sector": unescape(sector).strip(), "industry": ""})
+    if len(rows) < 200:
+        raise SystemExit(f"nikkei225: only {len(rows)} members parsed - page layout changed?")
+    write("nikkei225", rows, "Nikkei Inc. component list (indexes.nikkei.co.jp)")
+
+
+def hsi() -> None:
+    df = pick(tables("https://en.wikipedia.org/wiki/Hang_Seng_Index"), "Ticker", "Name", "Sub-index")
+    rows = []
+    for _, r in df.iterrows():
+        code = "".join(ch for ch in str(r[col(df, "Ticker")]) if ch.isdigit())
+        if not code:
+            continue
+        sym = code.zfill(4) + ".HK"
+        sector, industry = yahoo_sector(sym)
+        rows.append({"symbol": sym, "name": r[col(df, "Name")], "sector": sector or r[col(df, "Sub-index")], "industry": industry})
+    write("hsi", rows, "Wikipedia (members), Yahoo search (sectors)")
+
+
+def simple(name: str, url: str, sym_col: str, name_col: str, sector_col: str, fix=lambda s: s) -> None:
+    df = pick(tables(url), sym_col, name_col)
+    sc = next((c for c in df.columns if sector_col.lower() in str(c).lower()), None)
+    rows = []
+    for _, r in df.iterrows():
+        sym = str(r[col(df, sym_col)]).strip()
+        if not sym or sym.lower() == "nan":
+            continue
+        rows.append({"symbol": fix(sym), "name": r[col(df, name_col)], "sector": r[sc] if sc is not None else "", "industry": ""})
+    write(name, rows)
+
+
+NEW_LISTS = {
+    "nikkei225": nikkei225,
+    "hsi": hsi,
+    "ftsemib": lambda: simple("ftsemib", "https://en.wikipedia.org/wiki/FTSE_MIB", "Ticker", "Company", "ICB Sector"),
+    "ibex35": lambda: simple("ibex35", "https://en.wikipedia.org/wiki/IBEX_35", "Ticker", "Company", "Sector"),
+    "aex25": lambda: simple("aex25", "https://en.wikipedia.org/wiki/AEX_index", "Ticker", "Company", "ICB Sector"),
+    "tsx60": lambda: simple("tsx60", "https://en.wikipedia.org/wiki/S%26P/TSX_60", "Symbol", "Company", "Sector",
+                            fix=lambda s: s.replace(".", "-") + ".TO"),
+    "asx200": lambda: simple("asx200", "https://en.wikipedia.org/wiki/S%26P/ASX_200", "Code", "Company", "Sector",
+                             fix=lambda s: s + ".AX"),
+}
+
+
+def main() -> int:
+    wanted = sys.argv[1:]
+    if not wanted or "original" in wanted:
+        original_lists()
+    for name, fn in NEW_LISTS.items():
+        if not wanted or name in wanted:
+            fn()
     return 0
 
 

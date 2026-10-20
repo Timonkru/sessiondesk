@@ -33,7 +33,7 @@ async function landing(root, uni, ctx) {
 }
 
 async function indexPage(root, u, tab, ctx) {
-  const region = ["sp500", "nasdaq100", "dow30"].includes(u.key) ? "Americas" : "Europe";
+  const region = u.region || "Europe";
   const TABS = [["members", "Members"], ["breadth", "Breadth, drivers & valuation"]];
   const body = h("div", null, loading("Loading member history… (first load of an index takes up to a minute)"));
   root.append(crumbs([["Markets", "#/markets"], ["Indices", "#/indices"], [region, "#/indices"], [u.name]]),
@@ -95,7 +95,7 @@ async function breadthTab(body, key, ctx) {
       onclick: () => { period = k; localStorage.setItem("sd.idxPeriod", k); drawDrivers(); } }, label)),
       h("span", { class: "muted small" }, `  ${d.name} ${pct(blk.index_move_pct)} (${signed(blk.index_points, 1)} pts) over ${blk.sessions || 1} session${(blk.sessions || 1) > 1 ? "s" : ""}`));
     const word = period === "1d" ? "today's" : period === "1w" ? "this week's" : "this month's";
-    const driverNote = pw
+    const driverNote = d.drivers_note ? d.drivers_note : pw
       ? `The Dow is price-weighted: index points = a member's dollar move / the Dow divisor${blk.divisor ? ` (${num(blk.divisor, 4)}, from prices and index level)` : ""}, so a $10 move in a $500 stock counts as much as a $10 move in a $50 stock.` +
         (blk.contrib_total != null ? ` Check: the members add up to ${signed(blk.contrib_total, 1)} pts against ${word} ${signed(blk.index_points, 1)} pts; a gap means the index quote and the member quotes are from slightly different times.` : "")
       : cap
@@ -124,8 +124,8 @@ async function breadthTab(body, key, ctx) {
         ["Own history", hist.n > 1 ? `${hist.n} days since ${hist.since}, average ${num(hist.avg, 1)}, today at the ${num(hist.percentile, 0)}th percentile` : "starts today (one point per day)"],
       ]));
     if (v.rejected && v.rejected.length) valBox.append(note("Excluded as implausible vendor P/E: " + v.rejected.join(", ")));
-  } else if (d.key !== "sp500") {
-    valBox.append(note("No member profiles yet - valuation appears once the profiles are cached (background refresh hourly)."));
+  } else if (d.valuation_note) {
+    valBox.append(note(d.valuation_note));
   }
   if (fs) {
     if (fs.error) valBox.append(h("h3", null, "FactSet Earnings Insight"), errorBox(fs.error));

@@ -1,0 +1,87 @@
+# source: Wikipedia (members), Yahoo search (sectors), fetched 2026-10-20 - re-run scripts/update_universes.py after index reviews
+symbol,name,sector,industry
+0005.HK,HSBC Holdings plc,Financial Services,Banks—Diversified
+0388.HK,HKEx Limited,Financial Services,Financial Data & Stock Exchanges
+0939.HK,China Construction Bank,Financial Services,Banks—Diversified
+1299.HK,AIA Group Limited,Financial Services,Insurance—Life
+1398.HK,Industrial and Commercial Bank of China,Financial Services,Banks—Diversified
+2318.HK,Ping An Insurance,Financial Services,Insurance—Life
+2388.HK,BOC Hong Kong (Holdings) Ltd,Financial Services,Banks—Regional
+2628.HK,China Life,Financial Services,Insurance—Life
+3968.HK,China Merchants Bank,Financial Services,Banks—Regional
+3988.HK,Bank of China Ltd,Financial Services,Banks—Diversified
+0002.HK,CLP Holdings Limited,Utilities,Utilities—Regulated Electric
+0003.HK,Hong Kong and China Gas Company Limited,Utilities,Utilities—Regulated Gas
+0006.HK,Power Assets Holdings Limited,Utilities,Utilities—Independent Power Producers
+0836.HK,China Resources Power,Utilities,Utilities—Independent Power Producers
+1038.HK,Cheung Kong Infrastructure Holdings Limited,Utilities,Utilities—Regulated Electric
+2688.HK,ENN Energy,Utilities,Utilities—Regulated Gas
+0012.HK,Henderson Land Development Company Limited,Real Estate,Real Estate—Diversified
+0016.HK,Sun Hung Kai Properties Limited,Real Estate,Real Estate—Development
+0101.HK,Hang Lung Properties Limited,Real Estate,Real Estate Services
+0688.HK,China Overseas Land & Investment Limited,Real Estate,Real Estate—Development
+0823.HK,Link REIT,Real Estate,REIT—Retail
+0960.HK,Longfor Properties,Real Estate,Real Estate—Development
+1109.HK,China Resources Land Limited,Real Estate,Real Estate—Development
+1113.HK,CK Asset Holdings,Real Estate,Real Estate—Development
+1209.HK,China Resources Mixc Lifestyle,Real Estate,Real Estate Services
+1997.HK,Wharf Real Estate Investment Company Limited,Real Estate,Real Estate Services
+0001.HK,CK Hutchison Holdings Limited,Industrials,Conglomerates
+0027.HK,Galaxy Entertainment Group Ltd.,Consumer Cyclical,Resorts & Casinos
+0066.HK,MTR Corporation Ltd,Industrials,Railroads
+0175.HK,Geely Auto,Consumer Cyclical,Auto Manufacturers
+0241.HK,Alibaba Health,Healthcare,Pharmaceutical Retailers
+0267.HK,CITIC Limited,Industrials,Conglomerates
+0285.HK,BYD Electronics,Technology,Electronic Components
+0288.HK,WH Group,Consumer Defensive,Packaged Foods
+0291.HK,China Resources Beer,Consumer Defensive,Beverages—Brewers
+0300.HK,Midea Group,Consumer Cyclical,"Furnishings, Fixtures & Appliances"
+0316.HK,Orient Overseas (International) Limited,Industrials,Marine Shipping
+0322.HK,Tingyi,Consumer Defensive,Packaged Foods
+0386.HK,Sinopec Corp,Energy,Oil & Gas Integrated
+0669.HK,Techtronic Industries,Industrials,Tools & Accessories
+0700.HK,Tencent Holdings Limited,Communication Services,Internet Content & Information
+0762.HK,China Unicom,Communication Services,Telecom Services
+0857.HK,PetroChina Company Limited,Energy,Oil & Gas Integrated
+0868.HK,Xinyi Glass,Basic Materials,Building Materials
+0881.HK,Zhongsheng Group,Consumer Cyclical,Auto & Truck Dealerships
+0883.HK,CNOOC Limited,Energy,Oil & Gas E&P
+0941.HK,China Mobile Ltd,Communication Services,Telecom Services
+0968.HK,Xinyi Solar,Technology,Solar
+0981.HK,Semiconductor Manufacturing International Corporation,Technology,Semiconductors
+0992.HK,Lenovo,Technology,Computer Hardware
+1024.HK,Kuaishou,Communication Services,Internet Content & Information
+1044.HK,Hengan International Group Co. Ltd,Consumer Defensive,Household & Personal Products
+1088.HK,China Shenhua Energy,Energy,Thermal Coal
+1093.HK,CSPC Pharmaceutical Group,Healthcare,Drug Manufacturers—General
+1099.HK,Sinopharm Group,Healthcare,Medical Distribution
+1177.HK,Sino Biopharm,Healthcare,Biotechnology
+1211.HK,BYD Company,Consumer Cyclical,Auto Manufacturers
+1378.HK,China Hongqiao Group,Basic Materials,Aluminum
+1810.HK,Xiaomi,Technology,Consumer Electronics
+1876.HK,Budweiser Brewing Company APAC,Consumer Defensive,Beverages—Brewers
+1928.HK,Sands China,Consumer Cyclical,Resorts & Casinos
+1929.HK,Chow Tai Fook,Consumer Cyclical,Luxury Goods
+2015.HK,Li Auto,Consumer Cyclical,Auto Manufacturers
+2020.HK,Anta Sports,Consumer Cyclical,Leisure
+2057.HK,ZTO Express,Industrials,Integrated Freight & Logistics
+2269.HK,WuXi Biologics,Healthcare,Biotechnology
+2313.HK,Shenzhou International,Consumer Cyclical,Textile Manufacturing
+2319.HK,Mengniu Dairy,Consumer Defensive,Packaged Foods
+2331.HK,Li-Ning,Consumer Cyclical,Leisure
+2359.HK,WuXi AppTec,Healthcare,Diagnostics & Research
+2382.HK,Sunny Optical,Technology,Electronic Components
+2618.HK,JD Logistics,Industrials,Integrated Freight & Logistics
+2899.HK,Zijin Mining,Basic Materials,Gold
+3690.HK,Meituan,Consumer Cyclical,Internet Retail
+3692.HK,Hansoh Pharmaceutical Group,Healthcare,Drug Manufacturers—Specialty & Generic
+6618.HK,JD Health,Healthcare,Pharmaceutical Retailers
+6690.HK,Haier,Consumer Cyclical,"Furnishings, Fixtures & Appliances"
+6862.HK,Haidilao,Consumer Cyclical,Restaurants
+9618.HK,JD.com,Consumer Cyclical,Internet Retail
+9633.HK,Nongfu Spring,Consumer Defensive,Beverages—Non-Alcoholic
+9888.HK,Baidu,Communication Services,Internet Content & Information
+9961.HK,Trip.com Group,Consumer Cyclical,Travel Services
+9988.HK,Alibaba Group,Consumer Cyclical,Internet Retail
+9992.HK,Pop Mart,Consumer Cyclical,Leisure
+9999.HK,NetEase,Communication Services,Electronic Gaming & Multimedia

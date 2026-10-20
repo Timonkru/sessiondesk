@@ -90,8 +90,27 @@ SECTOR_OF_ETF = {
 }
 
 
+# Whole sector names that the word rules would get wrong or miss (Nikkei's 36 industries, FTSE MIB, IBEX 35);
+# checked first. "Gas" alone is the utility (Nikkei), not "Oil & Gas".
+EXACT_SECTORS = {
+    "gas": "utilities", "electric power": "utilities", "securities": "financials", "retail": "discretionary",
+    "services": "industrials", "fishery": "staples", "petroleum": "energy", "rubber": "discretionary",
+    "steel": "materials", "nonferrous metals": "materials", "glass & ceramics": "materials", "pulp & paper": "materials",
+    "construction": "industrials", "machinery": "industrials", "shipbuilding": "industrials", "other manufacturing": "industrials",
+    "manufacturing": "industrials", "infrastructure": "industrials", "aviation": "industrials", "air transport": "industrials",
+    "land transport": "industrials", "marine transport": "industrials", "railway & bus": "industrials",
+    "trading companies": "industrials", "electric machinery": "technology", "precision instruments": "technology",
+    "tourism": "discretionary", "textile": "discretionary", "clothes and cosmetics": "discretionary", "gambling": "discretionary",
+    "consumer products and services": "discretionary", "automobiles and parts": "discretionary",
+    "automobiles & auto parts": "discretionary",
+}
+
+
 def canonical_sector(sector: str | None, industry: str | None = None) -> str | None:
     """Broad sector key for a member's sector text (pure, tested)."""
+    exact = EXACT_SECTORS.get((sector or "").strip().lower())
+    if exact:
+        return exact
     text = f"{sector or ''} | {industry or ''}".lower()
     for key, words in CANONICAL_RULES:
         if any(w in (sector or "").lower() for w in words):
@@ -115,6 +134,6 @@ async def drilldown(ctx, region: str, etf: str) -> dict:
     return {"region": region, "etf": etf, "sector": etf_row["name"] if etf_row else etf, "group": target, "etf_row": etf_row,
             "benchmark": perf.get("benchmark"), "rows": d["rows"], "n": d["n"],
             "note": ("Members of the S&P 500, Nasdaq-100 and Dow 30 in this sector. " if region == "us" else
-                     "Members of Euro Stoxx 50, DAX, CAC 40, FTSE 100 and SMI, grouped into eleven broad sectors - the STOXX "
+                     "Members of Euro Stoxx 50, DAX, CAC 40, FTSE 100, SMI, FTSE MIB, IBEX 35 and AEX, grouped into eleven broad sectors - the STOXX "
                      "sector ETFs are finer (e.g. Banks, Insurance and Financial services all show the financials here). ")
                     + "Moves from one year of daily closes, today's value live."}

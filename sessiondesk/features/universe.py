@@ -7,10 +7,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1] / "data" / "universes"
 
-UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dow30": "Dow 30", "dax40": "DAX 40", "ftse100": "FTSE 100",
-             "cac40": "CAC 40", "smi": "SMI", "stoxx50": "Euro Stoxx 50"}
-BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dow30": "^DJI", "dax40": "^GDAXI", "ftse100": "^FTSE", "cac40": "^FCHI",
-             "smi": "^SSMI", "stoxx50": "^STOXX50E"}
+UNIVERSES = {"sp500": "S&P 500", "nasdaq100": "Nasdaq-100", "dow30": "Dow 30", "tsx60": "S&P/TSX 60",
+             "dax40": "DAX 40", "ftse100": "FTSE 100", "cac40": "CAC 40", "smi": "SMI", "stoxx50": "Euro Stoxx 50",
+             "ftsemib": "FTSE MIB", "ibex35": "IBEX 35", "aex25": "AEX",
+             "nikkei225": "Nikkei 225", "hsi": "Hang Seng", "asx200": "S&P/ASX 200"}
+# The index each list is measured against. The S&P/TSX 60 has no free index quote on Yahoo: the iShares ETF
+# that tracks it (XIU) stands in.
+BENCHMARK = {"sp500": "^GSPC", "nasdaq100": "^NDX", "dow30": "^DJI", "tsx60": "XIU.TO", "dax40": "^GDAXI", "ftse100": "^FTSE",
+             "cac40": "^FCHI", "smi": "^SSMI", "stoxx50": "^STOXX50E", "ftsemib": "FTSEMIB.MI", "ibex35": "^IBEX", "aex25": "^AEX",
+             "nikkei225": "^N225", "hsi": "^HSI", "asx200": "^AXJO"}
+REGION = {"sp500": "Americas", "nasdaq100": "Americas", "dow30": "Americas", "tsx60": "Americas",
+          "nikkei225": "Asia-Pacific", "hsi": "Asia-Pacific", "asx200": "Asia-Pacific"}      # everything else: Europe
 
 # GICS sector (S&P 500 file) / ICB industry (Nasdaq-100 file) -> SPDR sector ETF
 SECTOR_ETF = {
