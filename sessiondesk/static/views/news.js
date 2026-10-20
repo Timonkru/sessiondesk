@@ -10,10 +10,13 @@ const FILTERS = [
 
 export async function render(root, _params, ctx) {
   let filter = localStorage.getItem("sd.newsFilter") || "all", query = "", items = [];
+  let market = localStorage.getItem("sd.newsMarket") || "";
   const list = h("ul", { class: "feed" }), info = h("p", { class: "note" });
   const search = h("input", { type: "search", placeholder: "search the archive (all headlines since install)", style: { width: "320px" } });
   const bar = h("div", { class: "tabs" });
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "News")), bar, h("div", { class: "toolbar" }, search), info, list);
+  const marketSel = h("select", { title: "Only headlines about this market (theme rules on the title)", onchange: (e) => { market = e.target.value; localStorage.setItem("sd.newsMarket", market); load(); } },
+    h("option", { value: "" }, "All markets"));
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "News")), bar, h("div", { class: "toolbar" }, marketSel, search), info, list);
 
   const drawTabs = () => clear(bar, FILTERS.map(([k, label]) => h("button", { class: k === filter ? "on" : "", onclick: () => { filter = k; localStorage.setItem("sd.newsFilter", k); drawTabs(); load(); } }, label)));
   const matches = (n) => {
@@ -21,6 +24,7 @@ export async function render(root, _params, ctx) {
     if (f.positions && !(n.held || []).length) return false;
     if (f.impact && n.impact !== f.impact) return false;
     if (f.group && n.group !== f.group) return false;
+    if (market && !(n.markets || []).includes(market)) return false;
     return !query;
   };
   const item = (n, fresh) => {
@@ -48,18 +52,24 @@ export async function render(root, _params, ctx) {
   const load = async () => {
     clear(list, loading());
     const f = FILTERS.find((x) => x[0] === filter)[2];
-    const qs = new URLSearchParams({ limit: "200", ...(f.group ? { group: f.group } : {}), ...(f.impact ? { impact: f.impact } : {}), ...(query ? { q: query } : {}) });
+    const qs = new URLSearchParams({ limit: "200", ...(f.group ? { group: f.group } : {}), ...(f.impact ? { impact: f.impact } : {}), ...(query ? { q: query } : {}), ...(market ? { market } : {}) });
     const d = f.positions
       ? await api("/api/news/positions?" + new URLSearchParams({ hours: query ? String(24 * 30) : "24", ...(query ? { q: query } : {}) }), { fresh: true })
       : await api("/api/news?" + qs.toString(), { fresh: true });
     items = d.items || [];
+    if (d.markets && marketSel.options.length === 1) {
+      marketSel.append(...d.markets.map((m) => h("option", { value: m.key }, m.label)));
+      marketSel.value = market;
+    }
+    if (f.positions && market) items = items.filter((n) => (n.markets || []).includes(market));
     if (f.positions && !items.length) { clear(list, h("li", { class: "muted" }, d.note || "No headline touched your open positions in the last 24 h.")); info.textContent = ""; return; }
     clear(list, items.map((n) => item(n)));
     if (!items.length) list.appendChild(h("li", { class: "muted" }, query ? "No match in the archive." : "No headlines yet - the feeds are polled in the background (first fill takes a few seconds after start)."));
     const errs = Object.keys(d.feed_errors || {});
-    info.textContent = `${items.length} headlines` + (query ? ` matching “${query}”` : "") + (errs.length ? ` · feeds failing: ${errs.join(", ")}` : "") +
+    const mlabel = market ? marketSel.selectedOptions[0]?.textContent : "";
+    info.textContent = `${items.length} headlines` + (mlabel ? ` on ${mlabel}` : "") + (query ? ` matching “${query}”` : "") + (errs.length ? ` · feeds failing: ${errs.join(", ")}` : "") +
       " · High impact = rule-based triage (central banks, top-tier data, geopolitics, tariffs, market structure); it is not a signal.";
-    ctx.setContext({ page: "News" + (query ? ` search “${query}”` : ` (${filter})`), headlines: items.slice(0, 60).map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact, symbols: n.symbols })) });
+    ctx.setContext({ page: "News" + (query ? ` search “${query}”` : ` (${filter})`) + (market ? ` · market ${market}` : ""), headlines: items.slice(0, 60).map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact, symbols: n.symbols })) });
   };
   let timer;
   search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { query = search.value.trim(); load(); }, 250); });

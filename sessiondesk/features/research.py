@@ -153,7 +153,10 @@ async def feed(ctx, q: str | None = None, limit: int = 120) -> dict:
     rss = ctx.hub.get("rss")
     sources = [f["name"] for f in rss.feeds("research")] if rss else []
     saved = await ctx.db.run(ctx.db.saved)
-    out = {"items": rows, "sources": sources, "saved": saved, "asof": time.time()}
+    from .news import market_list, markets_of
+    for r in rows:
+        r["markets"] = markets_of(f"{r.get('title') or ''} {(r.get('summary') or '')[:400]}")
+    out = {"items": rows, "sources": sources, "saved": saved, "asof": time.time(), "markets": market_list()}
     if not q:
         from .news import held
         held_map = await held(ctx)

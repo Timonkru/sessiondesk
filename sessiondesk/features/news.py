@@ -107,6 +107,34 @@ def prepare(items: list[dict], group: str) -> list[dict]:
 
 
 # ------------------------------------------------------------------ headlines that touch open positions
+# Market filter for News and Research: the theme rules from assets.THEMES plus extra words per market.
+MARKETS = [
+    ("us", "US stocks", {"us_stocks", "fed", "us_macro", "tech"}, None),
+    ("europe", "Europe", {"eu_stocks", "ecb", "eu_macro"}, r"\beurope(an)?\b|\bgerman|\bfrance\b|\bfrench\b|\bital(y|ian)\b|\bspain\b|\bspanish\b|\beu\b"),
+    ("uk", "UK", {"boe", "uk_macro"}, r"\bbritain\b|\bbritish\b|\buk\b|\bpound\b|\blondon\b"),
+    ("japan", "Japan", {"boj", "japan"}, r"\bjapan"),
+    ("china", "China & Hong Kong", {"china", "pboc"}, r"\bchina\b|\bchinese\b|hong kong"),
+    ("rates", "Rates & bonds", {"yields", "fed", "ecb", "boe", "boj"}, r"\bbonds?\b|\byields?\b|\bcredit\b|\bspreads?\b"),
+    ("fx", "FX & dollar", {"usd"}, r"\bforex\b|\bfx\b|currenc|\beuro\b|\byen\b|sterling|\byuan\b|\bfranc\b|\bdollar\b"),
+    ("energy", "Oil, gas & power", {"oil"}, r"natural gas|\blng\b|\bpower (prices?|grid)|electricity|refiner|pipeline|\bcoal\b|uranium|tanker"),
+    ("metals", "Gold & metals", {"gold"}, r"\bsilver\b|copper|platinum|palladium|alumin(i)?um|iron ore|lithium|\bnickel\b|\bmetals?\b"),
+    ("agri", "Agriculture", set(), r"\bcorn\b|wheat|soybeans?|\bcoffee\b|cocoa|\bsugar\b|cotton|cattle|\bhogs?\b|\bgrains?\b|\bcrops?\b|harvest|fertili[sz]er|wasde|\busda\b"),
+    ("crypto", "Crypto", {"crypto"}, None),
+    ("tech", "Tech & AI", {"tech"}, r"\bai\b|artificial intelligence|\bchips?\b|software|data cent(er|re)s?"),
+]
+_MARKET_RX = {k: re.compile(x, re.IGNORECASE) for k, _, _, x in MARKETS if x}
+
+
+def markets_of(text: str) -> list[str]:
+    """Market keys whose themes or extra words appear in the text (title, for research also the summary)."""
+    themes = assets.themes_of(text)
+    return [k for k, _, th, _ in MARKETS if themes & th or (k in _MARKET_RX and _MARKET_RX[k].search(text or ""))]
+
+
+def market_list() -> list[dict]:
+    return [{"key": k, "label": label} for k, label, _, _ in MARKETS]
+
+
 def held_map(positions: list[dict], settings=None) -> dict[str, set[str]]:
     """Open positions -> {market or ticker: headline themes it reacts to}. Index/FX/commodity CFDs map to a market
     (DAX, GOLD, EURUSD ...) and its themes; single-stock CFDs (NVDA.US, SAP.DE) are matched by ticker only."""
@@ -174,7 +202,8 @@ async def ingest(ctx, items: list[dict], group: str, *, push: bool) -> list[dict
         specific = match_held(it, hmap, strict=True) if hmap else []
         if group == "squawk" or it["impact"] == "high" or (specific and it["impact"] == "medium"):
             ctx.broker.publish("news", {"item": {**{k: it.get(k) for k in ("id", "title", "url", "source", "published",
-                                                                          "impact", "tags", "symbols", "group")}, "held": touches}})
+                                                                          "impact", "tags", "symbols", "group")}, "held": touches,
+                                                 "markets": markets_of(it.get("title", ""))}})
             pushed.append(it)
     return pushed
 
@@ -198,7 +227,13 @@ async def poll_keyed(ctx, *, push: bool = True) -> int:
     return n
 
 
-async def list_news(ctx, group: str | None, q: str | None, impact: str | None, symbol: str | None, limit: int) -> dict:
-    rows = [r for r in await ctx.db.run(ctx.db.query_news, group, q, impact, symbol, limit) if not is_junk(r.get("title"))]
+async def list_news(ctx, group: str | None, q: str | None, impact: str | None, symbol: str | None, limit: int,
+                    market: str | None = None) -> dict:
+    pool = min(limit * 8, 3000) if market else limit            # the market match runs on titles, so read a larger pool
+    rows = [r for r in await ctx.db.run(ctx.db.query_news, group, q, impact, symbol, pool) if not is_junk(r.get("title"))]
+    for r in rows:
+        r["markets"] = markets_of(r.get("title", ""))
+    if market:
+        rows = [r for r in rows if market in r["markets"]][:limit]
     rss = ctx.hub.get("rss")
-    return {"items": rows, "feed_errors": dict(rss.errors) if rss else {}, "fts": ctx.db.fts}
+    return {"items": rows, "feed_errors": dict(rss.errors) if rss else {}, "fts": ctx.db.fts, "markets": market_list()}

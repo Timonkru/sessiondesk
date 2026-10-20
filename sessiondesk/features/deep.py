@@ -330,24 +330,26 @@ def _options(symbol: str, spot: float | None, must_cover: str | None = None) -> 
         p = puts[puts["strike"] == k].iloc[0] if (puts["strike"] == k).any() else None
         mid = lambda r: ((_f(r["bid"]) or 0) + (_f(r["ask"]) or 0)) / 2 if (_f(r["bid"]) or 0) > 0 and (_f(r["ask"]) or 0) > 0 else _f(r["lastPrice"])  # noqa: E731
         straddle = (mid(c) or 0) + (mid(p) or 0) if p is not None else None
-        iv = statistics.mean([v for v in (_f(c["impliedVolatility"]), _f(p["impliedVolatility"]) if p is not None else None) if v])
+        live = (_f(c["bid"]) or 0) > 0 and (_f(c["ask"]) or 0) > 0
+        ivs = [v for v in (_f(c["impliedVolatility"]), _f(p["impliedVolatility"]) if p is not None else None) if v]
+        iv = statistics.mean(ivs) if ivs and live else None   # without bid/ask Yahoo's IV is a placeholder
         days = max(1, (dt.date.fromisoformat(exp) - dt.date.today()).days)
         # 25-delta proxies: OTM put ~ 0.95 spot, OTM call ~ 1.05 spot
         def iv_at(df, target):
             row = df.iloc[(df["strike"] - target).abs().argsort()[:1]]
             return _f(row["impliedVolatility"].iloc[0]) if len(row) else None
-        put_wing, call_wing = iv_at(puts, spot * 0.95), iv_at(calls, spot * 1.05)
+        put_wing, call_wing = (iv_at(puts, spot * 0.95), iv_at(calls, spot * 1.05)) if live else (None, None)
         co, po = float(calls["openInterest"].fillna(0).sum()), float(puts["openInterest"].fillna(0).sum())
         cv, pv = float(calls["volume"].fillna(0).sum()), float(puts["volume"].fillna(0).sum())
         for key, v in (("call_oi", co), ("put_oi", po), ("call_vol", cv), ("put_vol", pv)):
             total[key] += v
         if nearest_pain is None:
             nearest_pain = max_pain(calls, puts)
-        rows.append({"expiry": exp, "days": days, "atm_strike": k, "atm_iv": iv, "straddle": straddle,
+        rows.append({"expiry": exp, "days": days, "atm_strike": k, "atm_iv": iv, "straddle": straddle, "live": live,
                      "implied_move": straddle / spot if straddle and spot else None,
                      "skew": (put_wing - call_wing) if put_wing and call_wing else None,
                      "put_call_oi": po / co if co else None, "put_call_volume": pv / cv if cv else None})
-    return {"spot": spot, "expiries": rows, "max_pain_nearest": nearest_pain,
+    return {"spot": spot, "expiries": rows, "max_pain_nearest": nearest_pain, "live_quotes": any(r["live"] for r in rows),
             "put_call_oi": total["put_oi"] / total["call_oi"] if total["call_oi"] else None,
             "put_call_volume": total["put_vol"] / total["call_vol"] if total["call_vol"] else None,
             "note": "Implied move = at-the-money straddle / spot for that expiry (market's expected absolute move, roughly one "
@@ -482,8 +484,139 @@ async def ownership(ctx, symbol: str) -> dict:
     return await ctx.cache.get(f"deep:own:{symbol}", 12 * 3600, lambda: _ownership(symbol), disk=True)
 
 
+# Spot FX has no exchange volume and no listed options on Yahoo. Proxies: the currency ETF's options for implied
+# volatility (FXE tracks EUR/USD, FXY tracks JPY/USD - the inverse of USD/JPY) and the CME futures for volume.
+FX_PROXIES = {   # pair: (options ETF or None, futures root, ETF moves against the pair)
+    "EURUSD": ("FXE", "6E", False), "USDJPY": ("FXY", "6J", True), "GBPUSD": ("FXB", "6B", False),
+    "AUDUSD": ("FXA", "6A", False), "USDCAD": ("FXC", "6C", True), "USDCHF": ("FXF", "6S", True),
+    "NZDUSD": (None, "6N", False), "EURGBP": (None, "RP", False), "EURJPY": (None, "RY", False),
+    "USDMXN": (None, "6M", True), "DXY": ("UUP", "DX", False),
+}
+QUARTER_CODES = {3: "H", 6: "M", 9: "U", 12: "Z"}
+
+
+def fx_pair(symbol: str) -> str | None:
+    """Yahoo FX symbol -> pair key of FX_PROXIES ("EURUSD=X" -> EURUSD, "JPY=X" -> USDJPY, "DX-Y.NYB" -> DXY)."""
+    s = (symbol or "").upper()
+    if s in ("DX-Y.NYB", "^DXY", "DXY"):
+        return "DXY"
+    if not s.endswith("=X"):
+        return None
+    s = s[:-2]
+    if len(s) == 3:                                     # Yahoo writes USD/JPY as "JPY=X"
+        s = "USD" + s
+    return s if s in FX_PROXIES else None
+
+
+def fx_proxy(symbol: str) -> dict | None:
+    pair = fx_pair(symbol)
+    if not pair:
+        return None
+    etf, root, inverted = FX_PROXIES[pair]
+    return {"pair": pair, "options": etf, "future": root, "inverted": inverted}
+
+
+def _third_wednesday(y: int, m: int) -> dt.date:
+    d = dt.date(y, m, 15)
+    return d + dt.timedelta(days=(2 - d.weekday()) % 7)
+
+
+def quarterly_contracts(root: str, today: dt.date) -> tuple[list[str], dt.date]:
+    """Front and next quarterly contract as Yahoo symbols, and the date of the last roll (pure, tested).
+    A contract counts as front until two days before its third Wednesday (CME currency futures expire then)."""
+    quarters = [(y, m) for y in (today.year - 1, today.year, today.year + 1, today.year + 2) for m in (3, 6, 9, 12)]
+    live = [(y, m) for y, m in quarters if _third_wednesday(y, m) - dt.timedelta(days=2) >= today]
+    expired = [(y, m) for y, m in quarters if (y, m) not in live]
+    suffix = ".NYB" if root == "DX" else ".CME"
+    syms = [f"{root}{QUARTER_CODES[m]}{y % 100:02d}{suffix}" for y, m in live[:2]]
+    last = expired[-1]
+    return syms, _third_wednesday(*last) - dt.timedelta(days=2)
+
+
+def volume_stats(bars: list[dict], now: float, since: float | None = None, long_avg: bool = True, running_h: float = 18) -> dict | None:
+    """Volume of the last complete session against the average of the sessions before it (pure, tested).
+    A bar is still running until `running_h` after its timestamp (stocks: open + 10 h; CME futures: 00:00 ET + 18 h =
+    after the 21:00 UTC close; crypto: 00:00 UTC + 24 h). `since` limits the averages to sessions after a futures roll. Yahoo sometimes repeats the
+    previous day's volume for a session it has not updated yet; that is flagged and the earlier session used."""
+    done = [b for b in bars if (b.get("v") or 0) > 0 and now >= b["t"] + running_h * 3600]
+    running = [b for b in bars if now < b["t"] + running_h * 3600]
+    repeated = len(done) >= 2 and done[-1]["v"] == done[-2]["v"]
+    if repeated:
+        done = done[:-1]
+    if len(done) < 6:
+        return None
+    last = done[-1]
+    window = [b["v"] for b in done[:-1] if since is None or b["t"] >= since]
+    avg20 = statistics.mean(window[-20:]) if len(window) >= 5 else None
+    avg250 = statistics.mean(window[-250:]) if long_avg and len(window) >= 120 else None
+    return {"last": last["v"], "last_day": dt.datetime.fromtimestamp(last["t"], dt.timezone.utc).date().isoformat(),
+            "avg20": avg20, "avg_n": min(len(window), 20), "avg250": avg250, "ratio20": last["v"] / avg20 if avg20 else None,
+            "today_so_far": running[-1].get("v") if running else None, "repeated": repeated,
+            "history": [b["v"] for b in done if since is None or b["t"] >= since][-60:]}
+
+
+def merge_volume(*series: list[dict]) -> list[dict]:
+    """Sum the volume of several contracts per session timestamp (pure)."""
+    out: dict[int, int] = {}
+    for bars in series:
+        for b in bars:
+            out[b["t"]] = out.get(b["t"], 0) + (b.get("v") or 0)
+    return [{"t": t, "v": v} for t, v in sorted(out.items())]
+
+
+async def futures_volume(ctx, symbol: str) -> dict:
+    """Volume of the instrument itself; for spot FX the front plus next CME quarterly future, since the last roll."""
+    from .stocks import history
+    import time as _time
+    proxy = fx_proxy(symbol)
+    now = _time.time()
+    if not proxy:
+        h = await history(ctx, symbol, "2y")
+        if "error" in h:
+            return h
+        running_h = 24 if symbol.endswith("-USD") else 18 if symbol.endswith("=F") else 10
+        stats = volume_stats(h.get("bars", []), now, running_h=running_h)
+        if not stats:
+            return {"error": f"no volume data for {symbol}"}
+        return {"symbol": symbol, "proxy": False, **stats, "source": h.get("source"),
+                "note": "Exchange volume of the last complete session against the average of the 20 (and 250) sessions before it."}
+    syms, roll = quarterly_contracts(proxy["future"], dt.date.today())
+    hs = await asyncio.gather(*(history(ctx, s, "6mo") for s in syms))
+    got = [h.get("bars", []) for h in hs if "error" not in h]
+    if not got:
+        return {"error": f"no futures data for {proxy['pair']} ({', '.join(syms)})"}
+    since = dt.datetime.combine(roll, dt.time(), dt.timezone.utc).timestamp() + 86400
+    stats = volume_stats(merge_volume(*got), now, since, long_avg=False)
+    if not stats:
+        return {"error": f"too few sessions since the last roll for {', '.join(syms)}"}
+    return {"symbol": " + ".join(s.split(".")[0] for s in syms), "proxy": True, **stats, "source": hs[0].get("source"),
+            "note": f"Spot FX trades over the counter and has no central volume; this is the CME futures volume of {' and '.join(syms)} "
+                    f"added up, averaged over the {stats['avg_n']} sessions since the last roll ({roll.isoformat()}). "
+                    "A longer average is left out: expired contracts are not available for free."}
+
+
 async def options(ctx, symbol: str) -> dict:
     from .stocks import history
+    proxy = fx_proxy(symbol)
+    if proxy:
+        if not proxy["options"]:
+            return {"error": f"no listed options proxy for {proxy['pair']} (only the major pairs have a currency ETF)"}
+
+        async def build_proxy():
+            day = await history(ctx, proxy["options"], "1d")
+            d = await asyncio.to_thread(_options, proxy["options"], day.get("price") if "error" not in day else None, None)
+            if "error" in d:
+                return d
+            if proxy["inverted"]:                       # the ETF's puts are the pair's calls
+                for r in d["expiries"]:
+                    r["skew"] = -r["skew"] if r.get("skew") is not None else None
+            d["proxy"] = proxy
+            d["note"] = (f"Options of the currency ETF {proxy['options']} (it tracks {proxy['pair']}"
+                         + (" inverted - skew sign flipped so a positive skew means the pair's downside is bid" if proxy["inverted"] else "")
+                         + "). Implied volatility and implied move in percent carry over to the pair; strikes, spot and straddle are in "
+                         "ETF dollars. These options trade thinly - read them as a rough gauge. " + d["note"])
+            return d
+        return await ctx.cache.get(f"deep:opt:{symbol}", 900, build_proxy)
 
     async def build():
         from .valuation import profile

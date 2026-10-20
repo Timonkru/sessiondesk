@@ -65,3 +65,17 @@ def test_market_wire_for_instrument_pages(tmp_path):
     out = asyncio.run(stocks.market_wire(ctx, "^GDAXI"))
     assert [w["id"] for w in out["wire"]] == ["a"] and out["wire_market"] == "DAX"   # c is older than 48 h
     assert asyncio.run(stocks.market_wire(ctx, "AAPL")) == {"wire": [], "wire_themes": []}
+
+
+def test_market_filter_tags():
+    assert "energy" in news.markets_of("Europe gas prices jump as LNG cargoes divert")
+    assert "europe" in news.markets_of("Europe gas prices jump as LNG cargoes divert")
+    assert news.markets_of("Corn futures slide after USDA raises crop estimate") == ["agri"]
+    assert {"japan", "fx"} <= set(news.markets_of("Yen weakens as BOJ holds"))
+    assert news.markets_of("Company picnic was nice") == []
+    assert [m["key"] for m in news.market_list()][:2] == ["us", "europe"]
+
+
+def test_news_api_market_filter(client):
+    d = client.get("/api/news?market=agri").json()
+    assert d["items"] == [] and any(m["key"] == "agri" for m in d["markets"])

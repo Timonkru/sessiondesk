@@ -259,7 +259,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def stock_deep(symbol: str, block: str):
         fn = {"statements": deep.statements, "street": deep.street, "ownership": deep.ownership, "options": deep.options,
               "performance": deep.performance, "earnings": deep.earnings, "dividends": deep.dividends,
-              "peers": deep.peers_table, "structure": company.structure}.get(block)
+              "peers": deep.peers_table, "structure": company.structure, "volume": deep.futures_volume}.get(block)
         if not fn:
             return {"error": "unknown block"}
         return await fn(C(), symbol)
@@ -320,8 +320,8 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     # ------------------------------------------------------------------ news, calendar, flows, research, macro
     @app.get("/api/news")
     async def get_news(group: str | None = None, q: str | None = None, impact: str | None = None,
-                       symbol: str | None = None, limit: int = 150):
-        return await news.list_news(C(), group, q, impact, symbol, min(limit, 500))
+                       symbol: str | None = None, limit: int = 150, market: str | None = None):
+        return await news.list_news(C(), group, q, impact, symbol, min(limit, 500), market)
 
     @app.get("/api/news/positions")
     async def get_news_positions(hours: int = 12, q: str | None = None, strict: bool = False):

@@ -56,3 +56,24 @@ def test_basket_api_roundtrip(client):
     assert [x["name"] for x in client.get("/api/baskets").json()["baskets"]] == ["Chips"]
     client.delete(f"/api/baskets/{b['id']}")
     assert client.get("/api/baskets").json()["baskets"] == []
+
+
+def test_fx_proxies_and_volume_stats():
+    from sessiondesk.features import deep
+    assert deep.fx_pair("EURUSD=X") == "EURUSD" and deep.fx_pair("JPY=X") == "USDJPY" and deep.fx_pair("DX-Y.NYB") == "DXY"
+    assert deep.fx_pair("AAPL") is None and deep.fx_pair("SEKNOK=X") is None
+    assert deep.fx_proxy("JPY=X") == {"pair": "USDJPY", "options": "FXY", "future": "6J", "inverted": True}
+    syms, roll = deep.quarterly_contracts("6E", dt.date(2026, 10, 20))
+    assert syms == ["6EZ26.CME", "6EH27.CME"] and roll == dt.date(2026, 9, 14)       # 3rd Wed 16 Sep minus 2 days
+    assert deep.quarterly_contracts("DX", dt.date(2026, 12, 14))[0] == ["DXZ26.NYB", "DXH27.NYB"]
+    assert deep.quarterly_contracts("DX", dt.date(2026, 12, 15))[1] == dt.date(2026, 12, 14)
+    day = 86400
+    bars = [{"t": i * day, "v": 100} for i in range(30)] + [{"t": 30 * day, "v": 300}, {"t": 31 * day, "v": 50}]
+    v = deep.volume_stats(bars, now=31 * day + 3600)                    # the bar of day 31 is still running
+    assert v["last"] == 300 and v["avg20"] == 100 and v["ratio20"] == 3 and v["today_so_far"] == 50 and not v["repeated"]
+    rep = deep.volume_stats(bars[:-2] + [{"t": 30 * day, "v": 100}], now=40 * day)
+    assert rep["repeated"] and rep["last_day"] == "1970-01-30"
+    since = deep.volume_stats(bars, now=40 * day, since=25 * day)
+    assert since["avg_n"] == 6 and since["avg250"] is None
+    assert deep.merge_volume([{"t": 1, "v": 2}], [{"t": 1, "v": 3}, {"t": 2, "v": 1}]) == [{"t": 1, "v": 5}, {"t": 2, "v": 1}]
+    assert deep.volume_stats([{"t": 0, "v": 5}] * 3, now=10 * day) is None

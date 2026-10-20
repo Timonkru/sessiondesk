@@ -6,7 +6,7 @@ import { h, clear, day, ago, note, loading, errorBox, markdown, ext } from "../l
 export async function render(root, params, ctx) {
   const listCol = h("div"), reader = h("div");
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Research")), h("div", { class: "cols" }, listCol, reader));
-  let data = { items: [], saved: [] }, source = "all", query = "";
+  let data = { items: [], saved: [] }, source = "all", query = "", market = localStorage.getItem("sd.researchMarket") || "";
 
   const search = h("input", { type: "search", placeholder: "search research items", style: { width: "240px" } });
   let timer;
@@ -19,10 +19,13 @@ export async function render(root, params, ctx) {
   const drawList = () => {
     const sources = ["all", "saved", ...new Set((data.items || []).map((i) => i.source))];
     const sel = h("select", { onchange: (e) => { source = e.target.value; drawList(); } }, sources.map((s) => h("option", { value: s, selected: s === source }, s === "all" ? "All sources" : s === "saved" ? "Reading list" : s)));
+    const msel = h("select", { title: "Only items about this market (theme rules on title and summary)", onchange: (e) => { market = e.target.value; localStorage.setItem("sd.researchMarket", market); drawList(); } },
+      h("option", { value: "" }, "All markets"), (data.markets || []).map((m) => h("option", { value: m.key, selected: m.key === market }, m.label)));
+    const inMarket = (i) => !market || (i.markets || []).includes(market);
     let items = source === "saved" ? (data.saved || []).map((s) => ({ title: s.title, url: s.url, source: s.source, published: s.saved }))
-                                   : (data.items || []).filter((i) => source === "all" || i.source === source);
-    const rec = source === "all" && !query ? (data.recommended || []) : [];
-    clear(listCol, h("div", { class: "toolbar" }, sel, search),
+                                   : (data.items || []).filter((i) => (source === "all" || i.source === source) && inMarket(i));
+    const rec = source === "all" && !query ? (data.recommended || []).filter(inMarket) : [];
+    clear(listCol, h("div", { class: "toolbar" }, sel, msel, search),
       rec.length ? h("div", { class: "block" }, h("h2", null, "Recommended for you"), h("ul", { class: "feed" }, rec.map((i) => h("li", { class: "click", onclick: () => open(i.url, i) },
         h("div", { class: "t" }, i.title), h("div", { class: "m" }, `${day(i.published)} · ${i.source} · `, h("span", { class: "warn" }, i.why.join(" · ")))))))
         : source === "all" && !query ? note("Recommended for you: nothing right now. Picks come from your open positions (their markets' themes), companies on your watchlist named in an item, and topics of articles you saved to the reading list.") : null,

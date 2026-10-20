@@ -44,7 +44,7 @@ async function overview(c) {
       p.website ? ext(p.website, p.website.replace(/^https?:\/\//, "")) : null) : null));
   // Facts from the other blocks, loaded in parallel.
   (async () => {
-    const want = isEquity(c) ? ["performance", "earnings", "street", "ownership", "options"] : ["performance", "options"];
+    const want = isEquity(c) ? ["performance", "earnings", "street", "ownership", "options", "volume"] : ["performance", "options", "volume"];
     const res = await Promise.all(want.map((b) => c.block(b)));
     const got = Object.fromEntries(want.map((b, i) => [b, res[i]]));
     const lines = [];
@@ -68,9 +68,11 @@ async function overview(c) {
     const opt = got.options;
     if (opt && opt.expiries && opt.expiries.length) {
       const nx = opt.expiries.find((x) => x.days >= 5) || opt.expiries[0];
-      lines.push([`Implied move to ${nx.expiry}`, `±${fp(nx.implied_move)} · IV ${fp(nx.atm_iv, 0)}`]);
+      lines.push([`Implied move to ${nx.expiry}`, `±${fp(nx.implied_move)}` + (nx.atm_iv != null ? ` · IV ${fp(nx.atm_iv, 0)}` : "") + (opt.proxy ? ` (via ${opt.proxy.options} options)` : "")]);
       if (opt.put_call_oi != null) lines.push(["Put/call (open interest)", n1(opt.put_call_oi)]);
     }
+    const vol = got.volume;
+    if (vol && vol.avg20) lines.push([vol.proxy ? `Volume (${vol.symbol} futures)` : "Volume", `${big(vol.last)} on ${vol.last_day} · ${n1(vol.ratio20, 1)}× its average`, vol.ratio20 >= 1.5 ? "warn" : ""]);
     clear(glance, lines.length ? kv(lines) : note("No additional data for this instrument."));
     c.pushContext();
   })();
@@ -285,8 +287,10 @@ async function options(c) {
   if (d.error) return fail(d);
   const ex = d.expiries || [];
   return h("div", null,
+    d.proxy ? note(`Spot ${d.proxy.pair} has no listed options; these are the options of the currency ETF ${d.proxy.options}.`) : null,
+    d.live_quotes === false ? note("No live option quotes right now (US options trade 15:30-22:00 CET). Implied volatility is shown only from live bid/ask; straddle and implied move use the last trades.", "warn") : null,
     kv([["Spot", price(d.spot)], ["Put/call open interest", n1(d.put_call_oi)], ["Put/call volume", n1(d.put_call_volume)], ["Max pain (nearest expiry)", price(d.max_pain_nearest)]]),
-    ex.length ? section("Implied volatility term structure", bars(ex.map((x) => ({ label: x.expiry.slice(5), value: (x.atm_iv || 0) * 100 })), { height: 150, fmt: (v) => v.toFixed(0) + "%" })) : null,
+    ex.some((x) => x.atm_iv != null) ? section("Implied volatility term structure", bars(ex.map((x) => ({ label: x.expiry.slice(5), value: x.atm_iv == null ? null : x.atm_iv * 100 })), { height: 150, fmt: (v) => v.toFixed(0) + "%" })) : null,
     section("Per expiry", h("div", { class: "scroll" }, table([{ label: "Expiry", render: (x) => x.expiry }, { label: "Days", num: true, render: (x) => x.days },
       { label: "ATM strike", num: true, render: (x) => price(x.atm_strike) }, { label: "ATM IV", num: true, render: (x) => fp(x.atm_iv) },
       { label: "Straddle", num: true, render: (x) => price(x.straddle) }, { label: "Implied move", num: true, render: (x) => (x.implied_move == null ? "–" : "±" + fp(x.implied_move)) },
@@ -296,8 +300,20 @@ async function options(c) {
 }
 
 // ================================================================== performance & risk
+function volumeSection(v) {
+  if (!v || v.error) return section("Volume", note(v && v.error ? v.error : "No volume data."));
+  return section(v.proxy ? `Volume - CME futures ${v.symbol}` : "Volume",
+    kv([[`Last complete session (${v.last_day})`, big(v.last)], [`Average of the ${v.avg_n} sessions before`, big(v.avg20)],
+      v.avg250 != null ? ["250-session average", big(v.avg250)] : null,
+      ["Last vs average", v.ratio20 == null ? "–" : n1(v.ratio20, 2) + "×", v.ratio20 >= 1.5 ? "warn" : ""],
+      v.today_so_far != null ? ["Running session so far", big(v.today_so_far)] : null]),
+    v.repeated ? note("The source repeated the previous volume for the newest session (not updated yet); the session before is used.", "warn") : null,
+    bars((v.history || []).map((x, i) => ({ label: i % 10 ? "" : String(i - (v.history.length - 1)), value: x })), { height: 110, fmt: (x) => big(x), values: false }),
+    note(v.note + (v.source ? ` Source: ${v.source}.` : "")));
+}
+
 async function performance(c) {
-  const d = await c.block("performance");
+  const [d, vol] = await Promise.all([c.block("performance"), c.block("volume")]);
   if (d.error) return fail(d);
   const s = d.stats, sea = d.seasonality || {};
   const windows = ["1W", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y"];
@@ -312,6 +328,7 @@ async function performance(c) {
         ["From 52w low", fr(s.range_52w.from_low), cls(s.range_52w.from_low)], ["50-day / 200-day avg", `${price(s.trend.sma50)} / ${price(s.trend.sma200)}`],
         ["vs 50-day / 200-day", `${fr(s.trend.vs_sma50)} / ${fr(s.trend.vs_sma200)}`], ["50 above 200", s.trend.golden == null ? "–" : s.trend.golden ? "yes" : "no"],
         ["Volume vs 20-day avg", s.volume.avg20 ? n1(s.volume.last / s.volume.avg20) + "×" : "–"]]))),
+    volumeSection(vol),
     section("Seasonality by month", h("div", { class: "scroll" }, table([{ label: "", render: (r) => r }, ...MONTHS.map((mn, i) => ({ label: mn, num: true,
       cls: (r) => (r === "Average" ? cls((sea.months || [])[i] && sea.months[i].avg) : ""),
       render: (r) => { const m = (sea.months || [])[i] || {}; if (r === "Average") return fr(m.avg); if (r === "Up share") return fp(m.up_share, 0); if (r === "t") return m.se ? num(m.avg / m.se, 1) : "–"; return m.n ?? "–"; } }))],

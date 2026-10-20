@@ -62,7 +62,7 @@ export function lineChart(points, { height = 260, ref = null, fmtY = (v) => v.to
   return wrap;
 }
 
-export function bars(rows, { height = 150, fmt = (v) => v.toFixed(2) } = {}) {
+export function bars(rows, { height = 150, fmt = (v) => v.toFixed(2), values = true } = {}) {
   // HTML columns (crisp text at any width). Negative values hang below a zero line.
   rows = (rows || []).filter((r) => r.value !== null && r.value !== undefined && Number.isFinite(r.value));
   const wrap = h("div", { class: "bars", style: { height: height + "px" } });
@@ -75,7 +75,7 @@ export function bars(rows, { height = 150, fmt = (v) => v.toFixed(2) } = {}) {
     const hgt = Math.max(1, (Math.abs(r.value) / span) * plot);
     const top = r.value >= 0 ? zeroFromTop - hgt : zeroFromTop;
     wrap.appendChild(h("div", { class: "barcol", title: `${r.label}: ${fmt(r.value)}` },
-      h("div", { class: "barval", style: { top: Math.max(0, (r.value >= 0 ? top : top + hgt) - (r.value >= 0 ? 15 : -2)) + "px" } }, fmt(r.value)),
+      values && h("div", { class: "barval", style: { top: Math.max(0, (r.value >= 0 ? top : top + hgt) - (r.value >= 0 ? 15 : -2)) + "px" } }, fmt(r.value)),
       h("div", { class: "bar " + (r.value >= 0 ? "up" : "down"), style: { top: top + "px", height: hgt + "px" } }),
       h("div", { class: "barlabel" }, r.label)));
   }
