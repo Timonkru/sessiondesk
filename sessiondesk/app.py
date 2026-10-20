@@ -195,7 +195,8 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     @app.post("/api/price_alerts")
     async def post_price_alert(request: Request):
         body = await request.json()
-        return await asyncio.to_thread(pricealerts.create, C(), body.get("symbol", ""), body.get("op", ""), body.get("level"), body.get("note", ""))
+        return await asyncio.to_thread(pricealerts.create, C(), body.get("symbol", ""), body.get("op", ""), body.get("level"), body.get("note", ""),
+                                       body.get("source", "quote"), body.get("field", "price"))
 
     @app.post("/api/price_alerts/{alert_id}")
     async def change_price_alert(alert_id: str, request: Request):
@@ -894,7 +895,7 @@ def record_activity(ctx):
             title, body = a.get("title", ""), a.get("body", "")
         elif kind == "price_alert":
             a = ev.get("alert") or {}
-            title, body = "price alert: " + a.get("title", ""), a.get("body", "")
+            title, body = "alert: " + a.get("title", ""), a.get("body", "")
         elif kind == "news" and (ev.get("item") or {}).get("impact") == "high":
             title = (ev.get("item") or {}).get("title", "")
         else:

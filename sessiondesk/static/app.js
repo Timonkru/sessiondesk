@@ -25,6 +25,7 @@ const VIEWS = {
   system: () => import("./views/system.js"),
   screener: () => import("./views/stocks.js"),           // old links
   stocks: () => import("./views/stocks.js"),
+  alerts: () => import("./views/alerts.js"),
   hub: () => import("./views/datahub.js"),
   sectors: () => import("./views/sectors.js"),
   baskets: () => import("./views/baskets.js"),
@@ -278,8 +279,9 @@ function wirePush() {
     notify(alert.title, alert.body);
   });
   on("price_alert", ({ alert }) => {
-    toast("Price alert: " + alert.title, alert.body, { kind: "high", onClick: () => ctx.go("#/stock/" + encodeURIComponent(alert.symbol)) });
-    notify("Price alert: " + alert.title, alert.body);
+    const src = (alert.data || {}).source || "quote";
+    toast("Alert: " + alert.title, alert.body, { kind: "high", onClick: () => ctx.go(["quote", "stock"].includes(src) ? "#/stock/" + encodeURIComponent(alert.symbol) : "#/alerts") });
+    notify("Alert: " + alert.title, alert.body);
     beep("high");
   });
   on("level", ({ alert }) => {

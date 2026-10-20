@@ -35,7 +35,7 @@ export async function render(root, _params, ctx) {
     ctx.setContext({ page: "Levels and price alerts", ...facts });
   };
   const body = h("div", null, loading());
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Levels"), h("span", { class: "meta" }, "gamma / file levels, round numbers, previous day and overnight range")), section("Your price alerts", alertsBox), body);
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Levels"), h("span", { class: "meta" }, "gamma / file levels, round numbers, previous day and overnight range")), section("Your price alerts", h("p", { class: "small" }, h("a", { href: "#/alerts" }, "all alerts - prices, data series, stock measures, baskets →")), alertsBox), body);
   loadAlerts();
   const lvl = (x) => h("span", { title: `${x.label} (${x.src})` }, h("span", { class: "small muted" }, x.label + " "), price(x.level),
     h("span", { class: "small " + (x.dist > 0 ? "up" : "down") }, ` ${x.dist > 0 ? "+" : ""}${num(x.dist, Math.abs(x.dist) < 10 ? 2 : 0)} (${pct(x.dist_pct, 2)})`));
