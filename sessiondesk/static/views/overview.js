@@ -1,8 +1,13 @@
-// Markets: what the markets do now - cross-asset board, your watchlist, the live squawk. Releases live in the
-// Calendar (the header strip always shows the next one), unusual moves on the Movers page.
+// Markets: what the markets do now - one cross-asset board (the key indices, futures, rates, FX, commodities, crypto,
+// volatility), your watchlist, the live squawk. Every index by region lives on Indices, the sectors on Sectors, so
+// this page does not repeat them. Releases live in the Calendar, unusual moves on the Movers page.
 import { api, on } from "../lib/api.js";
 import { h, clear, table, section, sparkline, price, pct, signed, dir, ago, clock, note, loading, errorBox } from "../lib/ui.js";
 import { watchlist } from "../lib/watchlist.js";
+
+const REGIONS = ["Americas", "Europe", "Asia-Pacific", "Middle East & Africa"];
+const KEY_INDICES = ["^GSPC", "^NDX", "^DJI", "^RUT", "^GDAXI", "^STOXX50E", "^FTSE", "^N225", "^HSI", "000001.SS"];
+const ELSEWHERE = { "US sectors": "#/sectors" };          // full lists with their own page: a link, not a second table
 
 export async function render(root, _params, ctx) {
   const left = h("div"), right = h("div"), meta = h("span", { class: "meta" });
@@ -18,10 +23,15 @@ export async function render(root, _params, ctx) {
     const d = await api("/api/overview", { fresh: true });
     if (d.error) { clear(left, errorBox(d.error)); return; }
     clear(left);
-    const groups = d.groups || [];
+    const all = d.groups || [];
+    const idx = all.filter((g) => REGIONS.includes(g.title)).flatMap((g) => g.rows);
+    const key = KEY_INDICES.map((s) => idx.find((r) => r.symbol === s)).filter(Boolean);
+    const groups = [{ title: "Key indices", rows: key, more: ["all " + idx.length + " indices by region", "#/indices"] },
+      ...all.filter((g) => !REGIONS.includes(g.title) && !ELSEWHERE[g.title])];
     for (const g of groups) {
       const isRates = g.title === "Rates";
-      left.appendChild(section(g.title, table([
+      left.appendChild(section(g.title, g.more ? h("p", { class: "small", style: { margin: "-4px 0 4px" } }, h("a", { href: g.more[1] }, g.more[0] + " →"), " · ",
+        h("a", { href: "#/sectors" }, "sectors →"), " · ", h("a", { href: "#/stocks" }, "stocks →")) : null, table([
         { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label),
           withMembers[r.symbol] ? h("a", { class: "small muted", style: { marginLeft: "6px" }, href: "#/indices/" + withMembers[r.symbol], title: "members, breadth, drivers, valuation" }, "members ›") : null] },
         { label: "Last", num: true, render: (r) => isRates ? (r.price != null ? r.price.toFixed(3) + "%" : "–") : price(r.price) },
