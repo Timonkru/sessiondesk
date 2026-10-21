@@ -151,3 +151,12 @@ def test_journal_start_balances_and_pct():
     journal.with_pct(cv, rows, {"A": sb})
     assert cv["A"]["periods"][0]["pct"] == 1.0 and round(cv["A"]["periods"][1]["pct"], 4) == round(-50 / 10100 * 100, 4)
     assert cv["A"]["cum"][-1]["pct"] == 0.5 and rows[0]["pct"] == 1.0
+
+
+def test_earnings_reported_helpers():
+    from sessiondesk.features import earnings_reported as er
+    assert er.money("$1.66") == 1.66 and er.money("($0.12)") == -0.12 and er.money("N/A") is None and er.money(None) is None
+    closes = [("2026-10-16", 100.0), ("2026-10-19", 102.0), ("2026-10-20", 110.16), ("2026-10-21", 99.144)]
+    assert round(er.reaction(closes, "2026-10-20", "after close"), 2) == -10.0       # digested on the 21st
+    assert round(er.reaction(closes, "2026-10-20", "pre-market"), 2) == 8.0          # digested on the 20th
+    assert er.reaction(closes, "2026-10-18", "pre-market") is None                    # no session on the report day

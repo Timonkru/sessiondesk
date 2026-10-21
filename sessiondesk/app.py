@@ -352,6 +352,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         # importance is ranked after the cache, so a watchlist change shows at once
         return {**data, "items": [{**r, **timeline.earnings_rank(r, watch, major)} for r in data.get("items") or []]}
 
+    @app.get("/api/earnings/reported")
+    async def get_earnings_reported(days: int = 6):
+        from .features import earnings_reported
+        return await earnings_reported.reported(C(), max(1, min(days, 14)))
+
     @app.get("/api/timeline")
     async def get_timeline(days: int = 7):
         from .features import timeline

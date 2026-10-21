@@ -277,7 +277,8 @@ def parse_nasdaq_earnings(payload: dict, day: dt.date) -> list[dict]:
         out.append({"symbol": sym, "name": r.get("name", ""), "date": day.isoformat(),
                     "timing": timing.get(r.get("time"), r.get("time") or "n/a"),
                     "eps_forecast": r.get("epsForecast") or None, "estimates": r.get("noOfEsts") or None,
-                    "market_cap": r.get("marketCap") or None, "last_year_eps": r.get("lastYearEPS") or None})
+                    "market_cap": r.get("marketCap") or None, "last_year_eps": r.get("lastYearEPS") or None,
+                    "eps_actual": r.get("eps") or None})             # filled once the company has reported
     return out
 
 

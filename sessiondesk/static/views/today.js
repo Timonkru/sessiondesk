@@ -106,7 +106,19 @@ export async function render(root, _params, ctx) {
     const retry = Math.min(...(d.blocks || []).map((b) => b.retry_in || Infinity));   // a block still loading asks for a re-check
     if (Number.isFinite(retry)) setTimeout(loadExt, Math.max(5, retry) * 1000);
   };
-  right.append(extBox, brief, posNews, changes, notesBox);
+  // earnings that came out since yesterday and matter (watchlist, mega caps) - the full list is Calendar > Earnings > Reported
+  const earnBox = h("div");
+  api("/api/earnings/reported?days=3", { ttl: 300000 }).then((d) => {
+    const items = (d.items || []).filter((r) => r.importance === "high").slice(0, 8);
+    if (!items.length) return;
+    clear(earnBox, section("Earnings reported", table([
+      { label: "", render: (r) => h("a", { href: `#/stock/${encodeURIComponent(r.symbol)}/earnings` }, r.symbol) },
+      { label: "Surprise", num: true, cls: (r) => dir(r.surprise_pct), render: (r) => (r.surprise_pct == null ? "–" : pct(r.surprise_pct, 1)) },
+      { label: "Stock", num: true, cls: (r) => dir(r.move), render: (r) => (r.move == null ? "pending" : pct(r.move, 1)) },
+      { label: "", render: (r) => h("span", { class: "small muted" }, `${r.date.slice(5)} ${r.why || ""}`) }], items),
+      h("p", { class: "small" }, h("a", { href: "#/calendar" }, "all relevant reports (Calendar → Earnings → Reported) →"))));
+  });
+  right.append(extBox, earnBox, brief, posNews, changes, notesBox);
   await Promise.all([load(), loadExt(), loadBrief(), loadPosNews(), loadChanges(), loadNotes()]);
   const offs = ["position", "level", "price_alert", "alert", "release", "briefing", "job"].map((k) => on(k, () => { loadChanges(); if (k === "briefing") loadBrief(); if (k === "position") { load(); loadPosNews(); } }));
   offs.push(on("news", ({ item }) => { if ((item.held || []).length) loadPosNews(); }));

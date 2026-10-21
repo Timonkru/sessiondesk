@@ -106,23 +106,48 @@ export async function render(root, _params, ctx) {
   const CAPS = [["0", "Any size"], ["2e9", "≥ 2 B"], ["10e9", "≥ 10 B"], ["50e9", "≥ 50 B"], ["200e9", "≥ 200 B"]];
   const IMPORTANCE = [["low", "All"], ["medium", "Medium + high"], ["high", "High only"]];
   const RANK = { low: 0, medium: 1, high: 2 };
+  let earnMode = localStorage.getItem("sd.earnMode") || "upcoming", reported = null;
   let earn = null, minCap = localStorage.getItem("sd.earnCap") || "10e9", minImp = localStorage.getItem("sd.earnImp") || "low",
     earnSort = localStorage.getItem("sd.earnSort") || "date";
   const pick = (key, opts, cur, set) => h("select", { onchange: (e) => { set(e.target.value); localStorage.setItem(key, e.target.value); drawEarn(); } },
     opts.map(([v, l]) => h("option", { value: v, selected: v === cur }, l)));
   const loadEarn = async () => {
     clear(body, loading());
-    earn = await api("/api/earnings?days=7", { ttl: 300000 });
+    [earn, reported] = await Promise.all([api("/api/earnings?days=7", { ttl: 300000 }), api("/api/earnings/reported", { ttl: 300000 })]);
     drawEarn();
+  };
+  const modeBar = () => h("span", { class: "tabs inline" }, [["upcoming", "Upcoming"], ["reported", "Reported"]].map(([k, l]) =>
+    h("button", { class: k === earnMode ? "on" : "", onclick: () => { earnMode = k; localStorage.setItem("sd.earnMode", k); drawEarn(); } }, l)));
+  const drawReported = () => {
+    const items = (reported && reported.items) || [], s = (reported && reported.summary) || {};
+    const keep = items.filter((r) => RANK[r.importance || "low"] >= RANK[minImp]);
+    clear(body, h("div", { class: "toolbar" }, modeBar(), h("label", null, "Importance", pick("sd.earnImp", IMPORTANCE.slice(1), minImp === "low" ? "medium" : minImp, (v) => { minImp = v; }))),
+      note(`${s.reported || 0} relevant reports in the last trading days; ${s.beat || 0} of ${s.with_estimate || 0} beat the EPS consensus.`),
+      h("div", { class: "scroll" }, table([
+        { label: "Date", render: (r) => `${r.date.slice(5)} ${r.timing === "after close" ? "AMC" : r.timing === "pre-market" ? "BMO" : ""}` },
+        { label: "Symbol", render: (r) => h("a", { href: `#/stock/${encodeURIComponent(r.symbol)}/earnings` }, r.symbol) },
+        { label: "Company", render: (r) => h("span", { class: "small" }, (r.name || "").slice(0, 28)) },
+        { label: "EPS", num: true, render: (r) => (r.actual == null ? "–" : num(r.actual, 2)) },
+        { label: "Est.", num: true, render: (r) => (r.estimate == null ? "–" : num(r.estimate, 2)) },
+        { label: "Surprise", num: true, cls: (r) => dir(r.surprise_pct), render: (r) => (r.surprise_pct == null ? "–" : pct(r.surprise_pct, 1)) },
+        { label: "Stock", num: true, cls: (r) => dir(r.move), render: (r) => (r.move == null ? "pending" : pct(r.move, 1)) },
+        { label: "S&P 500", num: true, cls: (r) => dir(r.market), render: (r) => (r.market == null ? "–" : pct(r.market, 1)) },
+        { label: "vs market", num: true, cls: (r) => dir(r.excess), render: (r) => (r.excess == null ? "–" : pct(r.excess, 1)) },
+        { label: "Why", render: (r) => h("span", { class: "small muted" }, r.why || "") },
+      ], keep, { empty: "No relevant report in the last trading days." })),
+      note(reported && reported.note ? reported.note + " AMC = after the close, BMO = before the open; 'pending' = the reaction session has not closed yet." : ""));
+    ctx.setContext({ page: "Earnings reported", summary: s, reports: keep.slice(0, 80).map((r) => ({ date: r.date, timing: r.timing, symbol: r.symbol,
+      actual: r.actual, estimate: r.estimate, surprise_pct: r.surprise_pct, move: r.move, vs_market: r.excess })) });
   };
   const drawEarn = () => {
     if (tab !== "earn" || !earn) return;
+    if (earnMode === "reported") { drawReported(); return; }
     const items = earn.items || [], cap = Number(minCap);
     // your watchlist names always pass the size filter; unknown market caps only show with "Any size"
     const keep = items.filter((r) => RANK[r.importance || "low"] >= RANK[minImp] && (r.why === "watchlist" || cap === 0 || (r.cap || 0) >= cap))
       .sort(earnSort === "cap" ? (a, b) => (b.cap || 0) - (a.cap || 0) : (a, b) => (a.date + a.symbol).localeCompare(b.date + b.symbol));
     const IMP = { high: "warn", medium: "", low: "muted" };
-    clear(body, h("div", { class: "toolbar" },
+    clear(body, h("div", { class: "toolbar" }, modeBar(),
       h("label", null, "Market cap", pick("sd.earnCap", CAPS, minCap, (v) => { minCap = v; })),
       h("label", null, "Importance", pick("sd.earnImp", IMPORTANCE, minImp, (v) => { minImp = v; })),
       h("label", null, "Sort", pick("sd.earnSort", [["date", "By date"], ["cap", "By market cap"]], earnSort, (v) => { earnSort = v; }))),
