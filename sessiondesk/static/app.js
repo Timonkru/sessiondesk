@@ -28,7 +28,6 @@ const VIEWS = {
   alerts: () => import("./views/alerts.js"),
   desk: () => import("./views/desk.js"),
   portfolio: () => import("./views/portfolio.js"),
-  country: () => import("./views/country.js"),
   monitor: () => import("./views/monitor.js"),
   centralbanks: () => import("./views/centralbanks.js"),
   hub: () => import("./views/datahub.js"),
