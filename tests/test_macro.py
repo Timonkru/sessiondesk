@@ -48,3 +48,26 @@ def test_rates_world_parsers():
     assert rw.parse_mof_csv(mof) == ("2026-10-19", {"1y": 1.642, "2y": 1.904, "10y": 2.935})
     row = rw._row("X", ("2026-10-20", 2.5), "p", {"2y": ("2026-10-19", 3.05), "10y": ("2026-10-19", 4.0)}, "2y", "s", "u")
     assert round(row["gauge_bp"]) == 55 and round(row["s2s10"]) == 95
+
+
+def test_central_bank_schedule_parsers():
+    from sessiondesk.features import centralbanks as cb
+    fed = "<p>2026 FOMC Meetings</p><div>January</div><div>27-28</div><div>March</div><div>17-18*</div><p>2025 FOMC Meetings</p><div>December</div><div>9-10</div>"
+    assert cb.parse_fed(fed) == ["2025-12-10", "2026-01-28", "2026-03-18"]
+    ecb = ("<td>28/10/2026</td><td>Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 1)</td>"
+           "<td>29/10/2026</td><td>Governing Council of the ECB: monetary policy meeting in Frankfurt (Day 2), followed by press conference</td>"
+           "<td>25/11/2026</td><td>Governing Council of the ECB: non-monetary policy meeting (in Frankfurt)</td>")
+    assert cb.parse_ecb(ecb) == ["2026-10-29"]
+    boe = "<h3>2026 confirmed dates</h3><p>Thursday 5 November</p><p>Thursday&nbsp;17 December</p><p>Current Bank Rate</p><p>3.75%</p>"
+    assert cb.parse_boe(boe) == (["2026-11-05", "2026-12-17"], 3.75)
+    boj = "<p>Table : 2026</p><p>Date of MPM</p><td>Jan. 22 (Thurs.), 23 (Fri.) [PDF]</td><td>Jan. 23 (Fri.) [PDF]</td><td>Oct. 29 (Thurs.), 30 (Fri.)</td>"
+    assert cb.parse_boj(boj) == ["2026-01-23", "2026-10-30"]
+    assert cb.dedupe(["2027-01-26", "2027-01-27", "2027-03-17"]) == ["2027-01-27", "2027-03-17"]
+    assert round(cb.day_move([("2026-10-28", 100.0), ("2026-10-29", 101.0)], "2026-10-29"), 2) == 1.0
+
+
+def test_central_bank_extras():
+    from sessiondesk.features import centralbanks as cb
+    assert cb.parse_ecb_last("<p>Latest monetary policy press conference</p><p>10 September 2026</p>") == "2026-09-10"
+    closes = [("2026-09-17", 100.0), ("2026-09-19", 102.0)]                 # no point stamped on the 18th
+    assert round(cb.day_move(closes, "2026-09-18"), 2) == 2.0 and cb.day_move(closes, "2026-09-01") is None

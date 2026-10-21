@@ -22,7 +22,7 @@ export const PAGES = {
   ECO: ["#/calendar", "Calendar"], FLOW: ["#/flows", "Forced flows"], IDX: ["#/indices", "Indices"],
   SECT: ["#/sectors", "Sectors"], EQS: ["#/stocks", "Stocks"], SCREEN: ["#/stocks", "Stocks"], MOST: ["#/watch", "Movers"],
   BSKT: ["#/baskets", "Baskets"], HUB: ["#/hub", "Data hub"], ECST: ["#/macro", "Macro"], MACRO: ["#/macro", "Macro"], CMDTY: ["#/commodities", "Commodities & energy"],
-  CTRY: ["#/country", "Countries"], CRUDE: ["#/monitor/oil", "Crude oil monitor"], NATGAS: ["#/monitor/gas", "Gas & power monitor"],
+  CTRY: ["#/country", "Countries"], WIRP: ["#/centralbanks", "Central banks"], CBANKS: ["#/centralbanks", "Central banks"], CRUDE: ["#/monitor/oil", "Crude oil monitor"], NATGAS: ["#/monitor/gas", "Gas & power monitor"],
   BULLION: ["#/monitor/gold", "Gold monitor"], TANK: ["#/tankers", "Tankers (AIS)"], ALRT: ["#/alerts", "Alerts"], DESK: ["#/desk", "My desk"], PORT: ["#/portfolio", "Portfolio"],
   JRNL: ["#/journal", "Journal"], RSRCH: ["#/research", "Research"], HELP: ["#/help", "Help"],
 };

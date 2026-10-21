@@ -30,6 +30,7 @@ const VIEWS = {
   portfolio: () => import("./views/portfolio.js"),
   country: () => import("./views/country.js"),
   monitor: () => import("./views/monitor.js"),
+  centralbanks: () => import("./views/centralbanks.js"),
   hub: () => import("./views/datahub.js"),
   sectors: () => import("./views/sectors.js"),
   baskets: () => import("./views/baskets.js"),

@@ -564,6 +564,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return await monitors.monitor(ctx, key)
         return await ctx.cache.get(f"monitor:{key}", 60, build)
 
+    @app.get("/api/centralbanks")
+    async def get_centralbanks():
+        from .features import centralbanks
+        ctx = C()
+
+        async def build():
+            return await centralbanks.monitor(ctx)
+        return await ctx.cache.get("cb:monitor", 300, build)
+
     @app.get("/api/portfolio")
     async def get_portfolio():
         from .features import portfolio
