@@ -297,3 +297,11 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .hubwarnings .feed { margin: 4px 0; }
 .hubgrid .hublist section.block { overflow-x: auto; }
 @media (max-width: 1000px) { .hubgrid { grid-template-columns: minmax(0, 1fr); } .hubgrid .hubdetail { position: static; order: -1; } }
+/* extension blocks inside desk tiles: compact headings, none when the tile shows a single block */
+.desk .tilebody section.block { margin: 0 0 8px; }
+.desk .tilebody section.block > h2 { font-size: 12px; margin: 0 0 4px; }
+.desk .tilebody.single section.block > h2 { display: none; }
+/* key-value blocks in a tile: two columns unless the tile is wide (container query on the tile body) */
+.desk .tilebody { container-type: inline-size; }
+.desk .tilebody dl.kv { grid-template-columns: max-content 1fr; }
+@container (min-width: 520px) { .desk .tilebody dl.kv { grid-template-columns: max-content 1fr max-content 1fr; } }

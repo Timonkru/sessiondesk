@@ -42,6 +42,11 @@ A Today block that is still loading can carry `"retry_in": 15`; the Today page t
 many seconds. If you start background work with `asyncio.ensure_future`, keep a reference to the task
 (asyncio holds tasks only weakly).
 
+Every block of `page()` (except inputs) can also be put on **My desk**: Edit → Add a tile → Extension block, then
+pick the extension and the block by its title. The tile matches the title up to the first `(` or `:`, so a title
+that carries live numbers ("Late day (2026-10-21)") keeps its tile. The tile calls `page()` once a minute: answer
+from your cache if building the page is slow.
+
 `page()` gets the same context object the built-in pages use: `ctx.settings`, `ctx.cache`
 (`await ctx.cache.get(key, ttl_seconds, async_builder)` caches and de-duplicates), `ctx.http`
 (shared async HTTP client), `ctx.hub` (connectors) and `ctx.data_dir`. Built-in feature functions can be

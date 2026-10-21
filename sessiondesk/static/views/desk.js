@@ -1,5 +1,6 @@
 // My desk: your own screens of tiles (quotes, a chart, an instrument, Data hub series, news, calendar, alerts, a basket,
-// tankers, sectors, index movers). Several layouts as tabs. Tiles are dragged by their title bar and resized at the
+// tankers, sectors, index movers, your accounts with the prop-rule meter, open positions, and any block of a local
+// extension - e.g. a private page's traffic light - without that code entering the repository). Several layouts as tabs. Tiles are dragged by their title bar and resized at the
 // bottom-right corner on a free 24-column grid (lib/gridlayout.js); "Edit" adds, configures and removes them. Saved in settings.
 // Linked tiles (Bloomberg's launchpad groups): tiles in group A (or B) follow the symbol you click in any tile of that
 // group - the chart and the instrument tile jump to it; Ctrl/Cmd-click still opens the full page.
@@ -7,6 +8,17 @@ import { api } from "../lib/api.js";
 import { lineChart, multiChart } from "../lib/chart.js";
 import { h, clear, table, num, pct, price, dir, sparkline, note, loading, errorBox, clock, day, toast } from "../lib/ui.js";
 import { COLS, normalize, arrange, bottom } from "../lib/gridlayout.js";
+import { block } from "../lib/blocks.js";
+
+// choices for select-type parameters: async (current values) -> [[value, label]]
+const extChoices = async () => ((await api("/api/extensions", { ttl: 30000 })).items || []).filter((e) => !e.error).map((e) => [e.name, e.title]);
+const blockChoices = async (v) => {
+  if (!v.ext) return [["", "pick an extension first"]];
+  const d = await api(`/api/ext/${encodeURIComponent(v.ext)}`, { ttl: 30000 });
+  return [["", "all blocks"], ...(d.blocks || []).filter((b) => b.type !== "input" && b.title).map((b) => [b.title, b.title])];
+};
+// block titles may carry live numbers ("Late day (2026-10-21, live)"): match on the part before "(" or ":"
+const blockKey = (t) => String(t || "").split(/[(:]/)[0].trim().toLowerCase();
 
 // w: default width out of 24 columns, h: default height in grid rows
 const TILES = {
@@ -21,6 +33,9 @@ const TILES = {
   stocks: { label: "Movers in a list", params: [["scope", "index:dax40, index:sp500, region:eu, all ...", "index:dax40"], ["n", "how many each way", "5"]], every: 120, w: 8, h: 10 },
   sectors: { label: "Sector heat", params: [["region", "us or eu", "us"], ["period", "1d, 1w, 1m, 3m, ytd, 1y", "1m"]], every: 300, w: 12, h: 10 },
   tankers: { label: "Tankers (AIS)", params: [], every: 60, w: 8, h: 9 },
+  accounts: { label: "Accounts & prop meter", params: [], every: 15, w: 16, h: 8 },
+  positions: { label: "Open positions", params: [["account", "account (empty = all)", ""]], every: 15, w: 12, h: 9 },
+  ext: { label: "Extension block", params: [["ext", "extension", "", extChoices], ["block", "block", "", blockChoices]], every: 60, w: 8, h: 10 },
 };
 const defH = (type) => (TILES[type] || {}).h || 10;
 const ROW = 22, GAP = 8, MIN_W = 3, MIN_H = 3, MAX_H = 60;
@@ -160,6 +175,53 @@ const RENDER = {
       style: { background: heat(r[period], scale) } }, h("div", { class: "hn" }, r.name), h("div", { class: "hv" }, pct(r[period], 1))))));
     return { title: `Sectors · ${region === "us" ? "US" : "Europe"} · ${period}`, facts: rows.map((r) => [r.name, r[period]]) };
   },
+  async accounts(p, body) {
+    const d = await api("/api/today", { fresh: true });
+    if (d.error) { clear(body, errorBox(d.error)); return { title: "Accounts" }; }
+    if (!d.connected) { clear(body, note("No broker connected - MetaTrader 5: bridge/SessionDeskBridge.mq5 on one chart (Accounts & EAs).")); return { title: "Accounts" }; }
+    const room = (v, warnBelow) => h("span", { class: v != null && v < warnBelow ? "warn" : "" }, v == null ? "–" : pct(v, 2, false));
+    const flags = d.flags || [];
+    clear(body, table([
+      { label: "Account", render: (a) => [a.login, a.fresh === false ? h("span", { class: "warn small" }, " stale") : ""] },
+      { label: "Equity", num: true, render: (a) => `${num(a.equity, 0)} ${a.currency || ""}` },
+      { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : `${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`) },
+      { label: "To daily limit", num: true, render: (a) => room(a.daily_loss_room_pct, 1) },
+      { label: "To max loss", num: true, render: (a) => room(a.max_loss_room_pct, 2) },
+      { label: "Risk at stops", num: true, render: (a) => (a.risk_pct == null ? "–" : pct(a.risk_pct, 2, false)) },
+      { label: "Pos.", num: true, render: (a) => a.positions },
+      { label: "", render: (a) => (a.trade_allowed === false ? h("span", { class: "warn small" }, "AutoTrading off") : a.risk_multiplier === 0 ? h("span", { class: "warn small" }, "day locked") : "") },
+    ], d.accounts || []),
+    flags.length ? h("ul", { class: "feed compact" }, flags.map((f) => h("li", null, h("span", { class: f.level === "high" ? "warn small" : "muted small" }, `${f.account}: ${f.text}`)))) : null,
+    h("p", { class: "small" }, link("#/today", "Today →"), " · ", link("#/broker", "Accounts & EAs →")));
+    return { title: "Accounts & prop meter", facts: { accounts: (d.accounts || []).map((a) => ({ login: a.login, equity: a.equity, day_pct: a.day_pct, daily_loss_room_pct: a.daily_loss_room_pct, max_loss_room_pct: a.max_loss_room_pct })), flags } };
+  },
+  async positions(p, body) {
+    const d = await api("/api/broker", { fresh: true });
+    if (d.error) { clear(body, errorBox(d.error)); return { title: "Positions" }; }
+    if (!d.connected) { clear(body, note("No broker connected.")); return { title: "Positions" }; }
+    const rows = (d.positions || []).filter((x) => !p.account || String(x.account) === p.account.trim());
+    const total = rows.reduce((a, x) => a + (x.profit || 0), 0);
+    clear(body, table([
+      ...(p.account ? [] : [{ label: "Acct", render: (x) => h("span", { class: "small" }, x.account) }]),
+      { label: "Symbol", render: (x) => x.symbol }, { label: "Side", render: (x) => x.side },
+      { label: "Size", num: true, render: (x) => num(x.volume, 2) },
+      { label: "Stop", num: true, render: (x) => (x.sl ? price(x.sl) : h("span", { class: "warn" }, "none")) },
+      { label: "P/L", num: true, cls: (x) => dir(x.profit), render: (x) => num(x.profit, 2) },
+    ], rows, { empty: "No open positions." }), rows.length ? h("p", { class: "small" }, "Total ", h("span", { class: dir(total) }, num(total, 2))) : null);
+    return { title: `Open positions${p.account ? " · " + p.account : ""} (${rows.length})`, facts: rows.map((x) => ({ symbol: x.symbol, side: x.side, volume: x.volume, profit: x.profit, stop: x.sl })) };
+  },
+  async ext(p, body) {
+    if (!p.ext) { clear(body, note("Pick an extension and one of its blocks in the tile settings (⚙ under Edit).")); return { title: "Extension block" }; }
+    const d = await api(`/api/ext/${encodeURIComponent(p.ext)}`, { fresh: true });
+    const title = (d.extension || {}).title || p.ext;
+    if (d.error) { clear(body, errorBox(`${title}: ${d.error}`)); return { title }; }
+    const all = (d.blocks || []).filter((b) => b.type !== "input");
+    const blocks = p.block ? all.filter((b) => blockKey(b.title) === blockKey(p.block)) : all;
+    body.classList.toggle("single", blocks.length === 1);
+    clear(body, blocks.length ? blocks.map((b) => block(b, p.ext, () => {}))
+      : note(`No block "${p.block}" on ${title} right now. Its blocks: ${all.map((b) => b.title).filter(Boolean).join(", ") || "none"}.`));
+    return { title: p.block && blocks.length ? `${blocks[0].title} · ${title}` : title, facts: blocks };
+  },
   async tankers(p, body) {
     const d = await api("/api/tankers", { fresh: true });
     if (!d.configured) { clear(body, note("Needs your free aisstream.io key (Settings → Connectors).")); return { title: "Tankers" }; }
@@ -275,16 +337,40 @@ export async function render(root, params, ctx) {
     ] : null,
     h("button", { onclick: () => { editing = !editing; draw(); } }, editing ? "Done" : "Edit"));
 
+  // inputs for a tile's parameters: a select where the choices are known (filled async, the later ones follow the
+  // earlier ones), a text box otherwise; read() returns {key: value}
+  const paramForm = (spec, values, { wide = false } = {}) => {
+    const box = h(wide ? "div" : "span", { class: wide ? "tileedit" : "" });
+    const cur = { ...values };
+    const draw = async () => {
+      const els = [];
+      for (const [k, hint, def, choices] of spec.params) {           // in order: a later choice list depends on earlier values
+        if (cur[k] === undefined) cur[k] = def;
+        const el = choices
+          ? h("select", { dataset: { k }, title: hint, onchange: (e) => { cur[k] = e.target.value; draw(); } },
+            (await choices(cur)).map(([v, l]) => h("option", { value: v, selected: v === cur[k] }, l)))
+          : h("input", { type: "text", dataset: { k }, value: cur[k] ?? "", title: hint, placeholder: hint, style: { width: wide ? "100%" : "220px" },
+            oninput: (e) => { cur[k] = e.target.value; } });
+        if (choices && !el.querySelector("option[selected]") && el.options.length) cur[k] = el.value;
+        els.push(wide ? h("label", { class: "small" }, hint, el) : el);
+      }
+      clear(box, els);
+    };
+    draw();
+    return { el: box, read: () => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, String(v ?? "").trim()])) };
+  };
+
   const drawAdd = () => {
     if (!editing) { clear(addBox); return; }
     const type = h("select", null, Object.entries(TILES).map(([k, t]) => h("option", { value: k }, t.label)));
     const inputs = h("span");
-    const fill = () => clear(inputs, TILES[type.value].params.map(([k, hint, def]) => h("input", { type: "text", dataset: { k }, value: def, title: hint, placeholder: hint, style: { width: "220px" } })));
+    let form = null;
+    const fill = () => { form = paramForm(TILES[type.value], {}); clear(inputs, form.el); };
     type.addEventListener("change", fill);
     fill();
     clear(addBox, h("div", { class: "toolbar deskadd" }, h("strong", { class: "small" }, "Add a tile"), type, inputs,
       h("button", { onclick: async () => {
-        const p = {}; inputs.querySelectorAll("input").forEach((i) => { p[i.dataset.k] = i.value.trim(); });
+        const p = form.read();
         const spec = TILES[type.value];
         layout().tiles.push({ type: type.value, x: 0, y: bottom(layout().tiles), w: spec.w, h: spec.h, params: p });
         await save(); draw();
@@ -300,10 +386,8 @@ export async function render(root, params, ctx) {
     const params = () => ({ ...(t.params || {}), ...(group && LINKABLE.has(t.type) && groupSym[group] ? { symbol: groupSym[group] } : {}) });
     const tools = editing ? h("span", { class: "tiletools" },
       h("button", { class: "linkish", title: "settings", onclick: () => {
-        const box = h("div", { class: "tileedit" }, (spec ? spec.params : []).map(([k, hint]) => h("label", { class: "small" }, hint,
-          h("input", { type: "text", dataset: { k }, value: (t.params || {})[k] ?? "", style: { width: "100%" } }))),
-          h("button", { onclick: async () => { box.querySelectorAll("input").forEach((inp) => { t.params[inp.dataset.k] = inp.value.trim(); }); await save(); draw(); } }, "Apply"));
-        clear(body, box);
+        const form = paramForm(spec || { params: [] }, t.params || {}, { wide: true });
+        clear(body, form.el, h("button", { onclick: async () => { t.params = { ...(t.params || {}), ...form.read() }; await save(); draw(); } }, "Apply"));
       } }, "⚙"),
       h("select", { title: "link group", onchange: async (e) => { t.params = { ...(t.params || {}), link: e.target.value }; await save(); draw(); } },
         LINK_GROUPS.map(([v, l]) => h("option", { value: v, selected: v === group }, l))),
