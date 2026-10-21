@@ -91,8 +91,13 @@ def test_report_percent_only_has_no_amounts():
     text = report.to_csv(r, rid, fp)
     assert report.verify_csv(text)["ok"] and "10208" not in text and "-502" not in text     # no balance, no money result
     assert "units,percent" in text and "-4.9177" in text                                      # -502 of 10,208
+    assert "start_balance" not in text and "end_balance" not in text and "return_pct,-2.0376" in text   # -208 of 10,208
     pdf = "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(report.to_pdf(r, rid, fp))).pages)
     assert "10,208" not in pdf and "-502" not in pdf and "% of the start balance" in pdf
+    # no bare number that could be read as money: every decimal figure carries a % (the profit factor is labelled as such)
+    import re
+    bare = [m for m in re.findall(r"[+-]?\d[\d,]*\.\d\d(?!\d)(?!\s*%)", pdf.replace(fp, "")) if m not in ("0.59",)]
+    assert not bare, bare
 
 
 def test_same_second_deals_are_one_step():

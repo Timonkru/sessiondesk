@@ -151,13 +151,13 @@ def balance_check(deals: list[dict], balance_now: float, recorded: dict[str, flo
 # ------------------------------------------------------------------ fingerprint (pure, tested)
 def data_block(r: dict) -> dict:
     """What the fingerprint covers - exactly what the CSV carries, rounded the same way. units "percent": no money and
-    no lot sizes - balances as an index (start = 100), results in % of the start balance."""
+    no lot sizes and no balance - every figure in % of the start balance, the balance as the return since the start."""
     pct = r.get("units") == "percent"
     sb = r["start_balance"] or 1.0
     head = {"version": r["version"], "units": "percent" if pct else "money", "account": r["account"], "currency": r["currency"],
             "server": r["server"], "from": _stamp(r["start"]), "to": _stamp(r["end"])}
     if pct:
-        return {**head, "start_balance": 100.0, "end_balance": round(r["end_balance"] / sb * 100, 4),
+        return {**head, "return_pct": round((r["end_balance"] / sb - 1) * 100, 4),
                 "positions": [[p["position_id"], _stamp(p["opened"]) if p["opened"] else "", _stamp(p["closed"]), p["symbol"] or "",
                                p["side"] or "", "", round(p["net"] / sb * 100, 4)] for p in r["positions"]]}
     return {**head, "start_balance": _r2(r["start_balance"]), "end_balance": _r2(r["end_balance"]),
@@ -182,8 +182,9 @@ def to_csv(r: dict, rid: str, fp: str) -> str:
     out = io.StringIO()
     w = csv.writer(out, lineterminator="\n")
     w.writerow(["field", "value"])
-    for k in ("version", "units", "account", "currency", "server", "from", "to", "start_balance", "end_balance"):
-        w.writerow([k, b[k]])
+    for k in ("version", "units", "account", "currency", "server", "from", "to", "start_balance", "end_balance", "return_pct"):
+        if k in b:
+            w.writerow([k, b[k]])
     w.writerow(["sha256", fp])
     w.writerow(["report_id", rid])
     w.writerow(["generated_utc", _stamp(r["generated"])])
@@ -219,8 +220,9 @@ def verify_csv(text: str) -> dict:
         return {"ok": False, "error": "position table missing"}
     try:
         block = {"version": int(meta["version"]), "units": meta.get("units", "money"), "account": meta["account"], "currency": meta["currency"],
-                 "server": meta["server"], "from": meta["from"], "to": meta["to"], "start_balance": float(meta["start_balance"]),
-                 "end_balance": float(meta["end_balance"]),
+                 "server": meta["server"], "from": meta["from"], "to": meta["to"],
+                 **({"return_pct": float(meta["return_pct"])} if meta.get("units") == "percent"
+                    else {"start_balance": float(meta["start_balance"]), "end_balance": float(meta["end_balance"])}),
                  "positions": [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]]}
     except (KeyError, ValueError, IndexError) as e:
         return {"ok": False, "error": f"unreadable field: {e}"}
@@ -258,8 +260,8 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         return f"{v / sb * 100:+.2f} %" if pct else _money(v, cur if unit else "", sign)
 
     def B(v) -> str:
-        """A balance - or its index (start balance = 100)."""
-        return "-" if v is None else f"{v / sb * 100:.2f}" if pct else _money(v)
+        """A balance - or, in percent mode, the return since the start of the period."""
+        return "-" if v is None else f"{(v / sb - 1) * 100:+.2f} %" if pct else _money(v)
 
     def new_page():
         pdf.add_page()
@@ -293,7 +295,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     pdf.text(R, y, rid, 9, bold=True, color=blue, align="right")
     y += 18
     pdf.text(L, y, f"Account {r['account']}" + (f"  ·  {r['server']}" if r["server"] else "") + (f"  ·  {r['company']}" if r["company"] else "")
-             + ("  ·  results in % of the start balance, balance as an index (start = 100)" if pct else f"  ·  {cur}"), 9.5, color=dark)
+             + ("  ·  all figures in % of the start balance" if pct else f"  ·  {cur}"), 9.5, color=dark)
     y += 13
     pdf.text(L, y, f"Period {period}  ·  generated {_stamp(r['generated'])} UTC from the MetaTrader 5 deal history", 8.5, color=grey)
     chk = r.get("check") or {}
@@ -306,8 +308,8 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     col = lambda v: up if (v or 0) > 0 else down if (v or 0) < 0 else dark  # noqa: E731
     kpis = [
         ("Net result", M(r["net"], unit=True), col(r["net"])), ("Return on start balance", _pct(r["net_pct"]), col(r["net_pct"])),
-        ("Start balance" + (" (index)" if pct else ""), B(r["start_balance"]) + ("" if pct else f" {cur}"), dark),
-        ("End balance" + (" (index)" if pct else ""), B(r["end_balance"]) + ("" if pct else f" {cur}"), dark),
+        *([("Trading days", str(len(r["days"])), dark), ("Positions per trading day", f"{r['trades'] / len(r['days']):.1f}" if r["days"] else "-", dark)]
+          if pct else [("Start balance", B(r["start_balance"]) + f" {cur}", dark), ("End balance", B(r["end_balance"]) + f" {cur}", dark)]),
         ("Closed positions", str(r["trades"]), dark), ("Win rate", _pct(r["win_rate"], False), dark),
         ("Profit factor", "-" if r["profit_factor"] is None else f"{r['profit_factor']:.2f}", dark),
         ("Max drawdown (closed balance, of its peak)", f"{r['max_dd_pct']:.2f} %" if pct else f"{_money(r['max_dd'], cur)}  ({r['max_dd_pct']:.2f} %)",
@@ -324,8 +326,8 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         pdf.text(x + 8, yy + 13, k, 7.5, color=grey)
         pdf.text(x + 8, yy + 27, v, 11, bold=True, color=c)
     y += 6 * (bh + 6) + 16
-    y = heading(y, "Balance after each deal" + (" (index, start = 100)" if pct else ""))
-    pts = [(t, v / sb * 100) for t, v in r["curve"]] if pct else r["curve"]
+    y = heading(y, "Return since the start of the period, after each deal" if pct else "Balance after each deal")
+    pts = [(t, (v / sb - 1) * 100) for t, v in r["curve"]] if pct else r["curve"]
     ch_h = 170.0
     pdf.rect(L, y, R - L, ch_h, stroke=(0.85, 0.85, 0.85))
     vals = [v for _, v in pts]
@@ -338,8 +340,8 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     for k in range(5):
         v = lo + (hi - lo) * k / 4
         pdf.line(L + 50, Y(v), R - 10, Y(v), 0.3, (0.9, 0.9, 0.9))
-        pdf.text(L + 46, Y(v) + 3, f"{v:,.1f}" if pct else f"{v:,.0f}", 7, color=grey, align="right")
-    base = 100.0 if pct else r["start_balance"]
+        pdf.text(L + 46, Y(v) + 3, f"{v:+.1f} %" if pct else f"{v:,.0f}", 7, color=grey, align="right")
+    base = 0.0 if pct else r["start_balance"]
     pdf.line(L + 50, Y(base), R - 10, Y(base), 0.5, (0.6, 0.6, 0.6))
     steps = []
     for i, (t, v) in enumerate(pts):                     # a balance moves in steps: hold each level until the next deal
@@ -359,7 +361,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     # ---- days and symbols
     y = heading(new_page(), "Result per day (UTC)")
     y = table(y, [("Day", L, "left"), ("Positions closed", L + 160, "right"), ("Net, % of start" if pct else "Net", L + 270, "right"),
-                  ("Day %", L + 340, "right"), ("Balance index" if pct else "Balance", R, "right")],
+                  ("Day %", L + 340, "right"), ("Since start" if pct else "Balance", R, "right")],
               [[(d["day"], None), (str(d["trades"]), None), (M(d["net"]), col(d["net"])), (_pct(d["pct"]), col(d["net"])),
                 (B(d["balance"]), None)] for d in r["days"]])
     y = heading(y + 6, "Result per symbol")
@@ -386,7 +388,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         "deposits, withdrawals or payouts: one inside the period would make the start balance and the return wrong.",
         "A position counts in the period in which it was closed; its result includes the costs of all its deals (commission, swap).",
         "Positions still open at the end of the period are not included. Times and day boundaries are UTC.",
-        "Shown in percent: every result is a share of the start balance, the balance an index (start = 100); no amounts, no lot sizes." if pct else "",
+        "Shown in percent: every figure is a share of the start balance; no amounts, no balances, no lot sizes." if pct else "",
         f"The deal export available to this report starts on {_day(r['first_deal'])}." if r.get("first_deal") else "",
     ]
     chk = r.get("check") or {}
@@ -526,7 +528,8 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
            "units": r["units"]}
     await ctx.db.run(ctx.db.report_add, row)
     return {**row, "trimmed_from": trimmed, "check": {k: v for k, v in r["check"].items() if k != "rows"},
-            "summary": {k: r[k] for k in ("start_balance", "end_balance", "net", "net_pct", "trades", "win_rate", "profit_factor", "max_dd", "max_dd_pct")}}
+            "summary": {k: r[k] for k in (("net_pct", "trades", "win_rate", "profit_factor", "max_dd_pct") if r["units"] == "percent"
+                                          else ("start_balance", "end_balance", "net", "net_pct", "trades", "win_rate", "profit_factor", "max_dd", "max_dd_pct"))}}
 
 
 async def verify(ctx, data: bytes) -> dict:
