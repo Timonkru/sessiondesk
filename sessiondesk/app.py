@@ -521,6 +521,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         d = C().settings.get("desk")
         return d if isinstance(d, dict) and d.get("layouts") else DEFAULT_DESK
 
+    def _desk_tile(t: dict) -> dict:
+        # w is out of 24 columns; x/y/h (grid cells) are set once the free grid placed the tile (older layouts lack them)
+        out = {"type": str(t["type"])[:20], "w": max(1, min(24, int(t.get("w") or 4))),
+               "params": {str(k)[:20]: str(v)[:400] for k, v in (t.get("params") or {}).items()}}
+        for k, lo, hi in (("x", 0, 23), ("y", 0, 2000), ("h", 1, 80)):
+            if isinstance(t.get(k), (int, float)) and not isinstance(t.get(k), bool):
+                out[k] = max(lo, min(hi, int(t[k])))
+        return out
+
     @app.put("/api/desk")
     async def put_desk(request: Request):
         body = await request.json()
@@ -530,9 +539,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         clean = []
         for lay in layouts:
             tiles = [t for t in (lay.get("tiles") or []) if isinstance(t, dict) and t.get("type")][:40]
-            clean.append({"name": str(lay.get("name") or "Desk")[:40],
-                          "tiles": [{"type": str(t["type"])[:20], "w": max(2, min(12, int(t.get("w") or 4))),
-                                     "params": {str(k)[:20]: str(v)[:400] for k, v in (t.get("params") or {}).items()}} for t in tiles]})
+            clean.append({"name": str(lay.get("name") or "Desk")[:40], "tiles": [_desk_tile(t) for t in tiles]})
         desk = {"active": max(0, min(len(clean) - 1, int(body.get("active") or 0))), "layouts": clean}
         C().settings.replace("desk", desk)
         return desk

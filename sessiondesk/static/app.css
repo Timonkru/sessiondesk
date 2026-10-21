@@ -258,9 +258,19 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .stocktable [hidden] { display: none !important; }
 .stocktable .toolbar select { max-width: 190px; }
 /* My desk: a 12-column grid of tiles; one column on narrow screens */
-.desk { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; align-items: start; }
-.desk .tile { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; background: var(--bg); min-width: 0; overflow: hidden; }
-.desk .tilehead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+/* My desk: a free grid - tiles are placed in pixels by desk.js (lib/gridlayout.js), dragged and resized */
+.desk { position: relative; min-height: 120px; }
+.desk.busy { user-select: none; }
+.desk .tile { position: absolute; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px 8px; background: var(--bg); min-width: 0; overflow: hidden;
+  transition: left .15s ease, top .15s ease, width .15s ease, height .15s ease; }
+.desk .tile.lifted { transition: none; z-index: 5; opacity: .92; box-shadow: 0 8px 28px rgba(0, 0, 0, .35); }
+.desk .tilebody { flex: 1; min-height: 0; overflow: auto; }
+.desk .tilebody > p { margin: 0 0 4px; } .desk .tilebody > .heat { margin: 0; }
+.desk .tilegrip { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; opacity: .3;
+  background: linear-gradient(135deg, transparent 55%, var(--muted) 55%, var(--muted) 65%, transparent 65%, transparent 75%, var(--muted) 75%, var(--muted) 85%, transparent 85%); }
+.desk .tile:hover .tilegrip { opacity: .9; }
+.desk .tileghost { position: absolute; border: 2px dashed var(--link); border-radius: 4px; background: var(--hi); opacity: .6; pointer-events: none; transition: left .1s, top .1s, width .1s, height .1s; }
+.desk .tilehead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; cursor: move; user-select: none; touch-action: none; }
 .desk .tiletitle { font-weight: 600; font-size: 13px; }
 .desk .tiletools { display: flex; gap: 6px; align-items: center; }
 .desk .tiletools select { padding: 1px 4px; font-size: 12px; }
@@ -269,5 +279,9 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .desk .feed.compact li { padding: 4px 0; }
 .desk .heat { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
 .deskadd input { margin-right: 4px; }
-@media (max-width: 900px) { .desk .tile { grid-column: span 12 !important; } }
+@media (max-width: 760px) { .desk .tilehead { cursor: default; } .desk .tilegrip { display: none; } }
 .wc { font-variant-numeric: tabular-nums; }      /* seconds tick without the clock jumping sideways */
+/* linked desk tiles: a coloured group badge and edge */
+.desk .linkbadge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 3px; font-size: 11px; font-weight: 700; color: #fff; text-align: center; }
+.desk .linked-A .linkbadge { background: #4c8dff; } .desk .linked-A { border-left: 3px solid #4c8dff; }
+.desk .linked-B .linkbadge { background: #e8a33d; } .desk .linked-B { border-left: 3px solid #e8a33d; }
