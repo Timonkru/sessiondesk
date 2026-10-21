@@ -25,12 +25,27 @@ export async function render(root, _params, ctx) {
     const now = Date.now() / 1000;
     const want = (x) => shown.has(x.kind === "session" ? "setup" : x.kind);
     const items = (tl.items || []).filter(want);
+    const missing = items.filter((x) => x.result && x.result.missing).length;
     const boxes = KINDS.map(([k, label]) => h("label", null, h("input", { type: "checkbox", checked: shown.has(k), onchange: (e) => {
       if (e.target.checked) shown.add(k); else shown.delete(k);
       localStorage.setItem("sd.calKinds", JSON.stringify([...shown])); drawTimeline(); } }), " " + label));
     const byDay = new Map();
     for (const x of items) { if (!byDay.has(x.day)) byDay.set(x.day, []); byDay.get(x.day).push(x); }
     const KIND = { release: "● release", earnings: "◆ earnings", flow: "⇄ flow", setup: "· setup", session: "▸ session" };
+    // what came out: the actual against the forecast (releases), EPS against the estimate and the reaction (earnings)
+    const result = (x) => {
+      const r = x.result;
+      if (!r) return "";
+      if (r.missing) return h("span", { class: "muted small", title: "No source delivered the actual yet - see the note below the timeline." }, "no actual yet");
+      const cls = r.verdict === "above" || r.verdict === "beat" ? "up" : r.verdict === "below" || r.verdict === "miss" ? "down" : "";
+      if (x.kind === "earnings") {
+        return h("span", { class: "small" }, h("strong", { class: cls }, `EPS ${r.actual ?? "–"}`), ` vs ${r.forecast ?? "–"}`,
+          r.surprise_pct != null ? ` (${r.surprise_pct > 0 ? "+" : ""}${num(r.surprise_pct, 1)} %)` : "",
+          r.move != null ? h("span", { class: dir(r.move) }, ` · stock ${pct(r.move, 1)}`) : "");
+      }
+      return h("span", { class: "small" }, h("strong", { class: cls }, r.actual), ` vs ${r.forecast ?? "–"} fcst`,
+        r.verdict ? h("span", { class: "muted" }, ` · ${r.verdict}`) : "");
+    };
     clear(body, h("div", { class: "screenfilters" }, boxes),
       ...[...byDay].map(([d, rows]) => section(new Date(d + "T12:00:00").toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }), table([
         { label: "Time", render: (x) => (x.ts ? clock(x.ts) : h("span", { class: "muted small" }, "all day")) },
@@ -38,11 +53,15 @@ export async function render(root, _params, ctx) {
         { label: "", render: (x) => h("span", { class: "small " + (x.kind === "release" ? (x.level === "high" ? "warn" : "") : x.kind === "setup" ? "muted" : "") }, KIND[x.kind] || x.kind) },
         { label: "", render: (x) => h("span", { class: "small" }, x.tag || "") },
         { label: "What", render: (x) => (x.link ? h("a", { href: x.link }, x.title) : h("span", { style: { fontWeight: x.kind === "release" && x.level === "high" ? 600 : 400 } }, x.title)) },
+        { label: "Result", render: result },
         { label: "", render: (x) => h("span", { class: "muted small" }, x.detail || "") },
       ], rows, { rowClass: (x) => (x.ts && x.ts > now && x.ts - now < 1800 ? "hl" : "") }))),
-      items.length ? null : note("Nothing in the selected kinds for the next 7 days."),
+      items.length ? null : note("Nothing in the selected kinds from yesterday to the next 7 days."),
+      missing ? note(`${missing} released ${missing === 1 ? "number has" : "numbers have"} no actual yet. Actual values come from the free MetaTrader 5 bridge (bridge/SessionDeskBridge.mq5 on any chart: every currency within seconds)`
+        + " or a calendar key (TradingEconomics, Finnhub, FMP) in Settings → Connectors; Forex Factory's free feed carries forecasts only."
+        + (tl.has_actuals ? " A source with actuals is connected but did not cover these - an exporter limited to a few currencies or events does that." : ""), "warn") : null,
       note(tl.note + (Object.keys(tl.errors || {}).length ? " · Errors: " + Object.entries(tl.errors).map(([k, v]) => `${k}: ${v}`).join("; ") : "")));
-    ctx.setContext({ page: "Calendar timeline", items: items.slice(0, 150).map((x) => ({ day: x.day, time: x.ts ? new Date(x.ts * 1000).toISOString() : "all day", kind: x.kind, tag: x.tag, title: x.title, detail: x.detail })) });
+    ctx.setContext({ page: "Calendar timeline", items: items.slice(0, 150).map((x) => ({ day: x.day, time: x.ts ? new Date(x.ts * 1000).toISOString() : "all day", kind: x.kind, tag: x.tag, title: x.title, detail: x.detail, result: x.result || null })) });
   };
 
   const levelSel = h("select", { onchange: (e) => { level = e.target.value; localStorage.setItem("sd.calLevel", level); drawEco(); } },

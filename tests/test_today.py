@@ -160,3 +160,15 @@ def test_earnings_reported_helpers():
     assert round(er.reaction(closes, "2026-10-20", "after close"), 2) == -10.0       # digested on the 21st
     assert round(er.reaction(closes, "2026-10-20", "pre-market"), 2) == 8.0          # digested on the 20th
     assert er.reaction(closes, "2026-10-18", "pre-market") is None                    # no session on the report day
+
+
+def test_timeline_results():
+    from sessiondesk.features import timeline
+    now = 1_800_000_000
+    assert timeline.release_result({"ts": now + 60, "actual": None, "forecast": "1%"}, now) is None          # not out yet
+    assert timeline.release_result({"ts": now - 60, "actual": None, "forecast": "1%"}, now) == {"missing": True}
+    assert timeline.release_result({"ts": now - 60, "actual": None, "forecast": None}, now) is None          # a speech
+    r = timeline.release_result({"ts": now - 60, "actual": "2.8%", "forecast": "2.5%", "previous": "3.0%", "surprise": 0.3}, now)
+    assert r["verdict"] == "above" and r["actual"] == "2.8%"
+    e = timeline.earnings_result({"eps_actual": "$1.20", "eps_forecast": "$1.00", "surprise_pct": 20.0, "beat": True, "move": -3.1})
+    assert e["verdict"] == "beat" and e["move"] == -3.1

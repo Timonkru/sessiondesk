@@ -25,7 +25,9 @@ SYNONYMS = [(r"consumer price index", "cpi"), (r"producer price index", "ppi"), 
             (r"non-?farm (employment change|payrolls)", "nonfarm payrolls"), (r"personal consumption expenditures?", "pce"),
             (r"interest rate decision", "rate decision"), (r"federal funds rate", "rate decision"),
             (r"main refinancing rate", "rate decision"), (r"official bank rate", "rate decision"),
-            (r"\bmom\b", "m/m"), (r"\byoy\b", "y/y"), (r"\bqoq\b", "q/q")]
+            (r"\bmom\b", "m/m"), (r"\byoy\b", "y/y"), (r"\bqoq\b", "q/q"),
+            # MetaTrader names events in the terminal's language; the German words that decide core/period
+            (r"\bkern", "core "), (r"\(monat\)", " m/m"), (r"\(jahr\)", " y/y"), (r"\(quartal\)", " q/q")]
 STOP = {"m/m", "y/y", "q/q", "the", "of", "and", "s", "a", "in", "rate", "change", "flash", "prelim", "final", "sa", "nsa", "mom", "yoy"}
 KEY_TERMS = ["cpi", "ppi", "pce", "gdp", "nonfarm", "payrolls", "unemployment", "retail sales", "ism", "pmi", "jolts",
              "jobless claims", "rate decision", "fomc", "ecb", "boe", "boj", "snb", "rba", "boc", "employment", "inflation",
@@ -55,7 +57,35 @@ def same_event(a: dict, b: dict) -> bool:
     pa, pb = period(a["title"]), period(b["title"])
     if pa and pb and pa != pb:                 # CPI m/m and CPI y/y print at the same second - keep them apart
         return False
-    return len(ta & tb) / len(ta | tb) >= 0.5
+    return len(ta & tb) / len(ta | tb) >= 0.5 or same_numbers(a, b) or same_speaker(a, b)
+
+
+def same_numbers(a: dict, b: dict) -> bool:
+    """Titles in two languages (MT5 uses the terminal's language, Forex Factory English) share no words; the same
+    currency and second plus the same previous value identify the event. Forecasts differ between the two consensus
+    sources, so they only have to agree when the previous value is small and could be a coincidence (pure, tested)."""
+    pa, pb, fa, fb = (to_number(x.get(k)) for k in ("previous", "forecast") for x in (a, b))
+    if pa is None or pb is None or abs(pa - pb) > max(0.0051, 0.006 * max(abs(pa), abs(pb))):     # -8.557 vs -8.6
+        return False
+    return max(abs(pa), abs(pb)) >= 1 or (fa is not None and fb is not None and abs(fa - fb) <= 0.1001)
+
+
+SPEECH_WORDS = {"speaks", "spricht", "speech", "rede", "testifies", "president", "präsident", "governor", "gouverneur", "member",
+                "german", "chair", "board", "executive", "vorstandsmitglied", "deputy", "conference", "press"}
+
+
+def same_speaker(a: dict, b: dict) -> bool:
+    """Speeches carry no numbers: the same currency and time plus the same surname (a capitalised word of four or more
+    letters that is not a title) mark the same speech, whatever the language (pure, tested)."""
+    if any(x.get(k) not in (None, "") for x in (a, b) for k in ("forecast", "previous", "actual")):
+        return False
+    names = lambda t: {w for w in re.findall(r"\b[A-ZÄÖÜ][a-zäöüß]{3,}\b", t) if w.lower() not in SPEECH_WORDS}  # noqa: E731
+    return bool(names(a["title"]) & names(b["title"]))
+
+
+def same_words(a: dict, b: dict) -> bool:
+    ta, tb = tokens(a["title"]), tokens(b["title"])
+    return bool(ta and tb) and len(ta & tb) / len(ta | tb) >= 0.5
 
 
 def period(title: str) -> str:
@@ -83,6 +113,8 @@ def merge(sources: dict[str, list[dict]]) -> list[dict]:
                 rows.append({**ev, "sources": [src]})
                 continue
             hit["sources"].append(src)
+            if src == "ffcal" and "mt5" in hit["sources"] and not same_words(hit, ev):
+                hit["title"] = ev["title"]            # matched by the numbers: the English title, like every other row
             if IMPACT_RANK.get(ev.get("impact"), 0) > IMPACT_RANK.get(hit.get("impact"), 0):
                 hit["impact"] = ev["impact"]          # Forex Factory's impact grading usually wins here
             for key in ("actual", "forecast", "previous", "actual_value", "forecast_value"):

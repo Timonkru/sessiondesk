@@ -1,6 +1,7 @@
 """One timeline for everything scheduled: economic releases, earnings that matter to you, forced flows and your own
 session schedule. The other pages show only slices of it (Today: what concerns you now; the header: the next
-high-impact release).
+high-impact release). It starts yesterday, so what already came out shows its result: the actual against the forecast
+for releases, EPS against the estimate and the price reaction for earnings.
 
 Earnings are filtered to what is likely to matter: your watchlist, members of the Dow 30, Nasdaq-100, DAX 40 and
 Euro Stoxx 50, and anything above a market cap of 50 bn USD. The Earnings tab keeps the full list and filters it by
@@ -45,6 +46,25 @@ def earnings_rank(row: dict, watch: set[str], major: set[str]) -> dict:
     return {"cap": cap, "importance": level, "why": why}
 
 
+def release_result(e: dict, now: float) -> dict | None:
+    """Result of a release once its time has passed: actual vs forecast and the direction of the surprise; 'missing'
+    when the sources had no actual (pure, tested)."""
+    if e.get("ts") is None or e["ts"] > now:
+        return None
+    if e.get("actual") in (None, ""):
+        return {"missing": True} if e.get("forecast") not in (None, "") else None     # speeches etc. have no number
+    s = e.get("surprise")
+    return {"actual": e["actual"], "forecast": e.get("forecast"), "previous": e.get("previous"), "surprise": s,
+            "verdict": None if s is None else "above" if s > 0 else "below" if s < 0 else "as expected"}
+
+
+def earnings_result(r: dict) -> dict:
+    """Result of a report from the Reported list (pure)."""
+    return {"actual": r.get("eps_actual"), "forecast": r.get("eps_forecast"), "surprise_pct": r.get("surprise_pct"),
+            "verdict": None if r.get("beat") is None else "beat" if r["beat"] else "miss", "move": r.get("move"),
+            "excess": r.get("excess")}
+
+
 def earnings_items(rows: list[dict], watch: set[str], major: set[str]) -> list[dict]:
     out = []
     for r in rows:
@@ -59,20 +79,23 @@ def earnings_items(rows: list[dict], watch: set[str], major: set[str]) -> list[d
 
 
 async def timeline(ctx, days: int = 7) -> dict:
+    from .earnings_reported import reported
     now = time.time()
     today = dt.date.today()
+    yesterday = today - dt.timedelta(days=1)
     end = today + dt.timedelta(days=days)
     items: list[dict] = []
 
-    cal = await ctx.extras["calendar"].events(now - 6 * 3600, now + days * 86400)
+    start = dt.datetime.combine(yesterday, dt.time()).timestamp()
+    cal = await ctx.extras["calendar"].events(start, now + days * 86400)
     for e in cal.get("events", []):
         if e.get("impact") not in ("high", "medium"):
             continue
+        res = release_result(e, now)
         items.append({"day": dt.date.fromtimestamp(e["ts"]).isoformat(), "ts": e["ts"], "kind": "release", "tag": e.get("currency"),
-                      "title": e.get("title"), "level": e.get("impact"),
-                      "detail": " · ".join(x for x in (f"fcst {e['forecast']}" if e.get("forecast") else "",
-                                                       f"prev {e['previous']}" if e.get("previous") else "",
-                                                       f"actual {e['actual']}" if e.get("actual") else "") if x)})
+                      "title": e.get("title"), "level": e.get("impact"), "result": res,
+                      "detail": " · ".join(x for x in (f"fcst {e['forecast']}" if e.get("forecast") and not (res and res.get("actual")) else "",
+                                                       f"prev {e['previous']}" if e.get("previous") else "") if x)})
 
     errors = {}
     earn = ctx.cache.peek(f"earnings:{days}:{today}", disk=True)
@@ -82,7 +105,22 @@ async def timeline(ctx, days: int = 7) -> dict:
     if earn.get("error_detail"):
         errors["earnings"] = earn["error_detail"]
     watch = {s.upper() for s in (ctx.settings.get("watchlist") or [])}
-    items += earnings_items(earn.get("items") or [], watch, major_symbols())
+    upcoming = earnings_items(earn.get("items") or [], watch, major_symbols())
+    # reports of yesterday and today that are out: EPS vs estimate and the reaction (same list as Calendar > Earnings > Reported)
+    try:
+        rep = await reported(ctx, 6)
+    except Exception as e:  # noqa: BLE001 - the timeline still shows the schedule
+        rep, errors["reported earnings"] = {}, str(e)
+    done = {(r["symbol"], r["date"]): r for r in rep.get("items") or [] if r.get("date") in (yesterday.isoformat(), today.isoformat())}
+    for it in upcoming:
+        r = done.pop((it["tag"], it["day"]), None)
+        if r:
+            it["result"] = earnings_result(r)
+    for (sym, day), r in done.items():
+        upcoming.append({"day": day, "ts": None, "kind": "earnings", "tag": sym, "title": f"{r.get('name') or sym} reported",
+                         "detail": " · ".join(x for x in (r.get("timing"), r.get("why")) if x), "link": f"#/stock/{sym}",
+                         "level": "high" if sym in watch else "normal", "result": earnings_result(r)})
+    items += upcoming
 
     for f in flows.events_between(today, end):
         items.append({"day": f["date"], "ts": None, "kind": "flow", "tag": ", ".join(f.get("markets", [])[:2]), "title": f["name"],
@@ -94,7 +132,7 @@ async def timeline(ctx, days: int = 7) -> dict:
     while d <= end:
         for s in schedule_for(d, sessions, entries):
             ts = s["when"].timestamp()
-            if ts < now - 1800:
+            if ts < now - 1800 or d < today:
                 continue
             items.append({"day": d.isoformat(), "ts": ts, "kind": "session" if s.get("kind") == "session" else "setup",
                           "tag": s.get("session"), "title": s.get("label"), "detail": "", "level": "normal"})
@@ -103,6 +141,7 @@ async def timeline(ctx, days: int = 7) -> dict:
     # all-day items (earnings, flows) lead their day; timed items follow in time order
     items.sort(key=lambda x: (x["day"] or "", 0 if x["ts"] is None else 1, x["ts"] or 0, x["kind"]))
     return {"items": items, "days": days, "asof": now, "errors": errors, "sources": cal.get("sources", []),
+            "has_actuals": cal.get("has_actuals", False),
             "note": "Releases (high and medium impact), earnings of your watchlist, the big indices' members and large caps, "
-                    "forced flows from published rules, and your own schedule (Settings → Schedule). Earnings dates come "
-                    "from the free calendar and can move."}
+                    "forced flows from published rules, and your own schedule (Settings → Schedule), from yesterday on: what "
+                    "already came out shows its result. Earnings dates come from the free calendar and can move."}

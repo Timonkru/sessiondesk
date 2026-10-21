@@ -184,3 +184,29 @@ def test_feed_parser_handles_undated_items():
     raw = b"<rss><channel><item><title>No date here</title><link>https://x/1</link></item></channel></rss>"
     item = parse_feed(raw, "X")[0]
     assert item["undated"] and item["published"] < time.time() - 3600
+
+
+def test_calendar_matches_other_language_by_numbers():
+    ts = 1_800_000_000
+    ff = [{"id": "f1", "ts": ts, "currency": "GBP", "title": "CPI y/y", "impact": "high", "actual": None, "forecast": "3.4%", "previous": "3.8%"},
+          {"id": "f2", "ts": ts, "currency": "GBP", "title": "Core CPI y/y", "impact": "low", "actual": None, "forecast": "3.4%", "previous": "3.8%"},
+          {"id": "f3", "ts": ts, "currency": "USD", "title": "Crude Oil Inventories", "impact": "medium", "forecast": "-4.8M", "previous": "-8.6M"}]
+    mt5 = [{"id": "m1", "ts": ts + 30, "currency": "GBP", "title": "Verbraucherpreisindex (VPI) (Jahr)", "impact": "high",
+            "actual": "3.5%", "forecast": "3.4%", "previous": "3.8%"},
+           {"id": "m2", "ts": ts, "currency": "USD", "title": "EIA Rohöl, Änderung der Speichermenge", "impact": "high",
+            "actual": "-2.1M", "forecast": "-4.804M", "previous": "-8.557M"}]
+    merged = cal.merge({"ffcal": ff, "mt5": mt5})
+    cpi = next(e for e in merged if e["title"] == "CPI y/y")
+    assert cpi["actual"] == "3.5%" and set(cpi["sources"]) == {"mt5", "ffcal"} and cpi["surprise"] == pytest.approx(0.1)
+    core = next(e for e in merged if e["title"] == "Core CPI y/y")
+    assert core["sources"] == ["ffcal"] and core["actual"] is None          # same numbers, but core vs headline stays apart
+    oil = next(e for e in merged if e["currency"] == "USD")
+    assert oil["title"] == "Crude Oil Inventories" and oil["actual"] == "-2.1M" and len(merged) == 3
+    assert not cal.same_numbers({"forecast": "0.3%", "previous": None}, {"forecast": "0.3%", "previous": "0.2%"})
+    assert cal.same_numbers({"forecast": "198K", "previous": "199K"}, {"forecast": "200K", "previous": "199K"})       # claims
+    assert not cal.same_numbers({"forecast": "0.5%", "previous": "0.3%"}, {"forecast": "0.2%", "previous": "0.3%"})  # small, fcst apart
+    bailey = [{"ts": 1, "currency": "GBP", "title": "BoE, Gouverneur Bailey spricht"}, {"ts": 1, "currency": "GBP", "title": "BOE Gov Bailey Speaks"},
+              {"ts": 1, "currency": "GBP", "title": "MPC Member Greene Speaks"}]
+    assert cal.same_event(bailey[0], bailey[1]) and not cal.same_event(bailey[0], bailey[2])
+    nagel = ({"ts": 5, "currency": "EUR", "title": "BBk Präsident Nagel spricht"}, {"ts": 5, "currency": "EUR", "title": "German Buba President Nagel Speaks"})
+    assert cal.same_event(*nagel)
