@@ -25,3 +25,11 @@ def test_exposures_per_account():
     assert {r["name"]: r["net"] for r in a["by_currency"]} == {"EUR": 3000.0, "USD": 2000.0}   # DAX +5000 EUR, short EURUSD -2000 EUR +2000 USD
     assert a["risk_pct"] == 1.5 and a["largest"][0]["symbol"] == "GER40.cash"
     assert b["net_pct"] == -20 and b["without_stop"] == 1                                       # accounts stay separate
+
+
+def test_fx_legs_and_differential():
+    from sessiondesk.features import fxdrivers
+    assert fxdrivers.legs("EURUSD=X") == ("EUR", "USD") and fxdrivers.legs("JPY=X") == ("USD", "JPY")
+    assert fxdrivers.legs("DX-Y.NYB") == ("USD", "basket") and fxdrivers.legs("AAPL") is None
+    d = fxdrivers.differential({"policy": 2.5, "2y": 3.05, "10y": None}, {"policy": 3.875, "2y": 4.74, "10y": 5.09})
+    assert round(d["policy"]) == -138 and round(d["2y"]) == -169 and d["10y"] is None

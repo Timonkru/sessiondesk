@@ -107,7 +107,9 @@ export async function render(root, params, ctx) {
   };
 
   // ---------------------------------------------------------------- tabs
-  const tabsFor = () => ((state.summary && state.summary.type && state.summary.type !== "EQUITY") ? OTHER_TABS : EQUITY_TABS);
+  const isFx = /=X$/i.test(decodeURIComponent(symbol)) || decodeURIComponent(symbol) === "DX-Y.NYB";
+  const tabsFor = () => (isFx ? [OTHER_TABS[0], ["fx", "FX drivers"], ...OTHER_TABS.slice(1)]
+    : (state.summary && state.summary.type && state.summary.type !== "EQUITY") ? OTHER_TABS : EQUITY_TABS);
   const drawTabs = () => clear(tabBar, tabsFor().map(([k, label]) => h("button", { class: k === state.tab ? "on" : "", onclick: () => openTab(k) }, label)));
   let seq = 0;
   const openTab = async (k) => {

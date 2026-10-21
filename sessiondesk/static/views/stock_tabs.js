@@ -1,7 +1,7 @@
 // Tab renderers for the instrument page. Each returns one element; data comes from /api/stock/<sym>/deep/<block>.
 import { api } from "../lib/api.js";
 import { bars } from "../lib/chart.js";
-import { h, svg, table, section, price, pct, big, num, ratio, dir, ago, stamp, note, loading, errorBox, ext, clear } from "../lib/ui.js";
+import { h, svg, table, section, price, pct, big, num, ratio, dir, ago, stamp, day, clock, note, loading, errorBox, ext, clear } from "../lib/ui.js";
 
 const fr = (v, d = 1) => (v == null ? "–" : pct(v * 100, d));          // signed percent from a fraction
 const fp = (v, d = 1) => (v == null ? "–" : ratio(v, d));             // unsigned percent from a fraction
@@ -488,5 +488,33 @@ async function network(c) {
     note("Indices sized by estimated weight, holders by share held (latest 13F), peers from the same index and industry. Click an index or a peer to open it. Supplier and customer links follow once they can be read from filings."));
 }
 
-export const TABS = { overview, financials, earnings, street, valuation, ownership, options, performance, peers, people, network, dividends, news, filings };
+// ================================================================== FX drivers (currency pairs)
+async function fx(c) {
+  const d = await c.block("fx");
+  if (d.error) return fail(d);
+  const r = d.rates, bp = (v) => (v == null ? "–" : `${v > 0 ? "+" : ""}${Math.round(v)} bp`), y = (v) => (v == null ? "–" : n1(v, 2) + "%");
+  const legRow = (ccy, row) => ({ ccy, policy: row ? row.policy : null, y2: row ? row["2y"] : null, y10: row ? row["10y"] : null, date: row ? row.date : null, url: row ? row.url : null });
+  const rows = [legRow(d.base, r.base), legRow(d.quote, r.quote)];
+  const ev = (e) => [h("span", { class: "small" }, `${day(e.ts)} ${clock(e.ts)} `), h("span", { class: e.impact === "high" ? "warn" : "" }, `${e.currency} ${e.title}`)];
+  return h("div", null, grid(
+    h("div", null,
+      section(`Rates: ${d.base} vs ${d.quote}`, table([{ label: "", render: (x) => h("strong", null, x.ccy) }, { label: "Policy", num: true, render: (x) => y(x.policy) },
+        { label: "2y", num: true, render: (x) => y(x.y2) }, { label: "10y", num: true, render: (x) => y(x.y10) },
+        { label: "", render: (x) => (x.url ? h("a", { class: "small", href: x.url, target: "_blank", rel: "noopener noreferrer" }, x.date || "source") : h("span", { class: "small muted" }, "no free curve")) }], rows),
+        kv([["Differential policy", bp(r.diff.policy)], ["Differential 2y", bp(r.diff["2y"])], ["Differential 10y", bp(r.diff["10y"])],
+          ["Carry (policy, per year)", d.carry_pct == null ? "–" : `${d.carry_pct > 0 ? "+" : ""}${n1(d.carry_pct, 2)}% for long ${d.base}`]])),
+      section("Currency strength today", Object.keys(d.strength).length ? kv(Object.entries(d.strength).map(([k, v]) => [k, `${pct(v.strength, 2)} · rank ${v.rank} of ${v.of}`, cls(v.strength)]))
+        : note("No strength data."), h("p", { class: "small muted" }, d.strength_source || "")),
+      d.cot.length ? section("Positioning (CFTC)", table([{ label: "", render: (x) => x.market }, { label: "Net", num: true, render: (x) => num(x.net, 0) },
+        { label: "Week", num: true, cls: (x) => cls(x.week_change), render: (x) => num(x.week_change, 0) }, { label: "1y pct.", num: true, render: (x) => num(x.percentile, 0) + "%" },
+        { label: "", render: (x) => h("span", { class: "small muted" }, x.date) }], d.cot)) : null),
+    h("div", null,
+      section(`Releases ${d.base} / ${d.quote}`, table([{ label: "Next", render: ev }, { label: "Fcst / prev", num: true, render: (e) => h("span", { class: "small" }, `${e.forecast ?? "–"} / ${e.previous ?? "–"}`) }],
+        d.calendar.next, { empty: "Nothing medium or high impact ahead." }),
+        d.calendar.recent.length ? table([{ label: "Recent", render: ev }, { label: "Actual vs fcst", num: true, render: (e) => `${e.actual} vs ${e.forecast ?? "–"}` }], d.calendar.recent) : null),
+      section("Headlines", d.news.length ? headlineList(d.news) : note("No matching headlines.")))),
+    note(d.note + " Implied volatility and futures volume are on the Options and Performance tabs."));
+}
+
+export const TABS = { fx, overview, financials, earnings, street, valuation, ownership, options, performance, peers, people, network, dividends, news, filings };
 export { loading };

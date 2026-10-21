@@ -262,11 +262,16 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def stock_valuation(symbol: str):
         return await valuation.valuation(C(), symbol)
 
+    async def _fx_drivers(ctx, symbol):
+        from .features import fxdrivers
+        return await fxdrivers.drivers(ctx, symbol)
+
     @app.get("/api/stock/{symbol}/deep/{block}")
     async def stock_deep(symbol: str, block: str):
         fn = {"statements": deep.statements, "street": deep.street, "ownership": deep.ownership, "options": deep.options,
               "performance": deep.performance, "earnings": deep.earnings, "dividends": deep.dividends,
-              "peers": deep.peers_table, "structure": company.structure, "volume": deep.futures_volume}.get(block)
+              "peers": deep.peers_table, "structure": company.structure, "volume": deep.futures_volume,
+              "fx": _fx_drivers}.get(block)
         if not fn:
             return {"error": "unknown block"}
         return await fn(C(), symbol)
