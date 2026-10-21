@@ -110,3 +110,15 @@ def test_stocklist_scopes_and_merge():
     assert sie["indices"] == ["Euro Stoxx 50", "DAX 40"] and sie["group"] == "industrials" and sie["industry"] == "Industrials"
     bmw = next(r for r in rows if r["symbol"] == "BMW.DE")
     assert bmw["group_label"] == "Consumer discretionary" and bmw["industry"] == "Automotive" and len(rows) == 2
+
+
+def test_country_breadth_and_api(client):
+    from sessiondesk.features import countries
+    rows = [{"symbol": "A", "chg1d": 1.0, "dist200": 2.0, "from_high": -1.0}, {"symbol": "B", "chg1d": -2.0, "dist200": -1.0, "from_high": -9.0},
+            {"symbol": "C", "chg1d": None}]
+    b = countries.breadth(rows)
+    assert (b["n"], b["up"], b["above200"], b["near_high"]) == (2, 1, 50.0, 1) and b["best"][0]["symbol"] == "A"
+    assert countries.breadth([]) is None
+    assert countries.breadth([{"symbol": x, "chg1d": 0.0} for x in "ABCDE"])["before_open"] is True
+    assert "error" in client.get("/api/country/atlantis").json()
+    assert set(countries.COUNTRIES) >= {"us", "de", "uk", "jp"}

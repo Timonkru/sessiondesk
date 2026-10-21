@@ -527,6 +527,24 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         C().settings.replace("desk", desk)
         return desk
 
+    @app.get("/api/countries")
+    async def get_countries():
+        from .features import countries
+        ctx = C()
+
+        async def build():
+            return await countries.overview(ctx)
+        return await ctx.cache.get("countries:overview", 60, build)
+
+    @app.get("/api/country/{key}")
+    async def get_country(key: str):
+        from .features import countries
+        ctx = C()
+
+        async def build():
+            return await countries.page(ctx, key)
+        return await ctx.cache.get(f"country:{key}", 60, build)
+
     @app.get("/api/portfolio")
     async def get_portfolio():
         from .features import portfolio
