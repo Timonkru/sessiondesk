@@ -270,3 +270,4 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .desk .heat { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
 .deskadd input { margin-right: 4px; }
 @media (max-width: 900px) { .desk .tile { grid-column: span 12 !important; } }
+.wc { font-variant-numeric: tabular-nums; }      /* seconds tick without the clock jumping sideways */

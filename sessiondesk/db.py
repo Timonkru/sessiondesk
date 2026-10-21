@@ -249,6 +249,10 @@ class DB:
             self._conn.commit()
             return {"balance": balance, "equity": equity, "ts": time.time()}
 
+    def day_starts(self) -> dict:
+        """{(account, day): balance} of every stored day start."""
+        return {(r["account"], r["day"]): r["balance"] for r in self._exec("SELECT account, day, balance FROM day_start") if r["balance"]}
+
     # ------------------------------------------------------------ activity feed
     def add_activity(self, kind: str, title: str, body: str = "", ref: str = "") -> None:
         self._exec("INSERT INTO activity VALUES (?,?,?,?,?)", (time.time(), kind, title, body, ref))

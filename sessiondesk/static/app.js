@@ -208,7 +208,7 @@ const CLOCKS = [
   { label: "New York", short: "NY", tz: "America/New_York", exchange: "NYSE", open: 9 * 60 + 30, close: 16 * 60 },
   { label: "London", short: "LDN", tz: "Europe/London", exchange: "LSE", open: 8 * 60, close: 16 * 60 + 30 },
 ];
-const clockFmt = new Map(CLOCKS.map((c) => [c.tz, new Intl.DateTimeFormat("en-GB", { timeZone: c.tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })]));
+const clockFmt = new Map(CLOCKS.map((c) => [c.tz, new Intl.DateTimeFormat("en-GB", { timeZone: c.tz, weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })]));
 function tickClocks() {
   const el = $("worldClock");
   const now = new Date();
@@ -219,8 +219,8 @@ function tickClocks() {
     const open = weekday && mins >= c.open && mins < c.close;
     const state = !weekday ? "closed (weekend)" : open ? `open, closes in ${hm(c.close - mins)}`
       : mins < c.open ? `closed, opens in ${hm(c.open - mins)}` : "closed for the day";
-    return h("span", { class: "wc" + (open ? " open" : ""), title: `${c.label} ${p.hour}:${p.minute} (${p.weekday}) · ${c.exchange} ${state}. Holidays are not taken into account.` },
-      h("span", { class: "dot" }, open ? "●" : "○"), ` ${c.short} ${p.hour}:${p.minute}`);
+    return h("span", { class: "wc" + (open ? " open" : ""), title: `${c.label} ${p.hour}:${p.minute}:${p.second} (${p.weekday}) · ${c.exchange} ${state}. Holidays are not taken into account.` },
+      h("span", { class: "dot" }, open ? "●" : "○"), ` ${c.short} ${p.hour}:${p.minute}:${p.second}`);
   }));
 }
 
@@ -414,5 +414,5 @@ route();
 loadNextEvent();
 setInterval(tickStrip, 1000);
 tickClocks();
-setInterval(tickClocks, 5000);
+setInterval(tickClocks, 1000);
 setInterval(loadNextEvent, 5 * 60 * 1000);

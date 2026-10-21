@@ -718,6 +718,11 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import journal
         return await journal.view(C(), min(days, 365), include_copies=copies)
 
+    @app.get("/api/journal/day/{day}")
+    async def get_journal_day(day: str):
+        from .features import journal
+        return await journal.day_view(C(), day)
+
     @app.post("/api/journal")
     async def set_journal(request: Request):
         body = await request.json()

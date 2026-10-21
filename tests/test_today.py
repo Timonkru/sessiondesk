@@ -136,3 +136,18 @@ def test_earnings_rank_and_endpoint(client):
     items = {r["symbol"]: r for r in client.get("/api/earnings?days=3").json()["items"]}
     assert items["AAPL"]["importance"] == "high" and items["AAPL"]["cap"] == 3.5e12
     assert items["TINY"]["importance"] == "low"
+
+
+def test_journal_start_balances_and_pct():
+    import time as _t
+    from sessiondesk.features import journal
+    d1, d2 = _t.mktime(_t.strptime("2026-10-19 12:00", "%Y-%m-%d %H:%M")), _t.mktime(_t.strptime("2026-10-20 12:00", "%Y-%m-%d %H:%M"))
+    closed = [{"account": "A", "closed": d1, "net": 100.0}, {"account": "A", "closed": d2, "net": -50.0}]
+    sb = journal.start_balances(closed, 10050.0, ["2026-10-19", "2026-10-20"])
+    assert sb == {"2026-10-19": 10000.0, "2026-10-20": 10100.0}                     # 10050 now = 10000 + 100 - 50
+    assert journal.start_balances(closed, 10050.0, ["2026-10-20"], {"2026-10-20": 9999.0}) == {"2026-10-20": 9999.0}   # stored wins
+    cv = journal.curves(closed, 30)
+    rows = [dict(r) for r in closed]
+    journal.with_pct(cv, rows, {"A": sb})
+    assert cv["A"]["periods"][0]["pct"] == 1.0 and round(cv["A"]["periods"][1]["pct"], 4) == round(-50 / 10100 * 100, 4)
+    assert cv["A"]["cum"][-1]["pct"] == 0.5 and rows[0]["pct"] == 1.0
