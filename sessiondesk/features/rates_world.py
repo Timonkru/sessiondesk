@@ -15,10 +15,12 @@ import asyncio
 import csv
 import datetime as dt
 import io
+import logging
 
 ECB = "https://data-api.ecb.europa.eu/service/data/"
 BOE = "https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp"
 MOF = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/jgbcme.csv"
+log = logging.getLogger("sessiondesk.rates_world")
 UA = {"User-Agent": "Mozilla/5.0 (SessionDesk; +https://github.com/Timonkru/sessiondesk)"}
 TENORS = ["3m", "1y", "2y", "5y", "10y", "30y"]
 
@@ -73,6 +75,99 @@ def parse_mof_csv(text: str) -> tuple[str, dict[str, float]] | None:
         except ValueError:
             continue
     return dt.date(y, m, d).isoformat(), vals
+
+
+# ------------------------------------------------------------------ history (Data hub backfill)
+MOF_ALL = "https://www.mof.go.jp/english/policy/jgbs/reference/interest_rate/historical/jgbcme_all.csv"
+HISTORY_YEARS = 5
+
+
+def ecb_points(text: str) -> dict[str, list[tuple[str, float]]]:
+    """ECB csvdata -> {series key: [(date, value)]} (pure, tested)."""
+    out: dict[str, list[tuple[str, float]]] = {}
+    for r in csv.DictReader(io.StringIO(text)):
+        try:
+            out.setdefault(r["KEY"], []).append((r["TIME_PERIOD"], float(r["OBS_VALUE"])))
+        except (KeyError, ValueError):
+            continue
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def boe_points(text: str) -> dict[str, list[tuple[str, float]]]:
+    """BoE IADB CSV -> {code: [(date, value)]} (pure, tested)."""
+    rows = list(csv.reader(io.StringIO(text)))
+    if not rows or rows[0][0].upper() != "DATE":
+        return {}
+    out: dict[str, list[tuple[str, float]]] = {c: [] for c in rows[0][1:]}
+    for r in rows[1:]:
+        try:
+            day = dt.datetime.strptime(r[0].strip(), "%d %b %Y").date().isoformat()
+        except ValueError:
+            continue
+        for code, v in zip(rows[0][1:], r[1:]):
+            try:
+                out[code].append((day, float(v)))
+            except ValueError:
+                continue
+    return {k: sorted(v) for k, v in out.items() if v}
+
+
+def mof_points(text: str) -> dict[str, list[tuple[str, float]]]:
+    """MOF JGB curve CSV (the yearly archive or the current month) -> {tenor: [(date, yield)]}; '-' = no value (pure, tested)."""
+    rows = list(csv.reader(io.StringIO(text)))
+    head = next((r for r in rows if r and r[0] == "Date"), None)
+    if not head:
+        return {}
+    out: dict[str, list[tuple[str, float]]] = {}
+    for r in rows[rows.index(head) + 1:]:
+        if not r or not r[0][:4].isdigit():
+            continue
+        try:
+            day = dt.date(*(int(x) for x in r[0].split("/"))).isoformat()
+        except ValueError:
+            continue
+        for k, v in zip(head[1:], r[1:]):
+            try:
+                out.setdefault(k.lower(), []).append((day, float(v)))
+            except ValueError:
+                continue
+    return out
+
+
+async def history(ctx, countries: set[str]) -> dict[str, list[tuple[str, float]]]:
+    """{gov series id: points of the last HISTORY_YEARS} for the given country keys (us, ea, uk, jp), from the same
+    official sources as the latest values. Run once per series (see collect), not on every collection."""
+    http, start = ctx.http, dt.date.today() - dt.timedelta(days=365 * HISTORY_YEARS)
+    since = start.isoformat()
+    out: dict[str, list[tuple[str, float]]] = {}
+    if "us" in countries:
+        fred = ctx.hub.get("fred")
+        for key, sid in (("us2y", "DGS2"), ("us5y", "DGS5"), ("us10y", "DGS10"), ("uspolicy", "DFF")):
+            r = await fred.series(sid)
+            out[f"gov:{key}"] = [p for p in r.get("points", []) if p[0] >= since]
+    if "ea" in countries:
+        yc = "YC.B.U2.EUR.4F.G_N_A.SV_C_YM."
+        r1 = await http.get(ECB + "YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_2Y+SR_5Y+SR_10Y", params={"startPeriod": since, "format": "csvdata"},
+                            headers=UA, timeout=60)
+        r2 = await http.get(ECB + "FM/D.U2.EUR.4F.KR.DFR.LEV", params={"startPeriod": since, "format": "csvdata"}, headers=UA, timeout=60)
+        e = {**(ecb_points(r1.text) if r1.status_code == 200 else {}), **(ecb_points(r2.text) if r2.status_code == 200 else {})}
+        out.update({"gov:ea2y": e.get(yc + "SR_2Y", []), "gov:ea5y": e.get(yc + "SR_5Y", []), "gov:ea10y": e.get(yc + "SR_10Y", []),
+                    "gov:eapolicy": e.get("FM.D.U2.EUR.4F.KR.DFR.LEV", [])})
+    if "uk" in countries:
+        r = await http.get(BOE, params={"csv.x": "yes", "Datefrom": start.strftime("%d/%b/%Y"), "Dateto": "now",
+                                        "SeriesCodes": "IUDBEDR,IUDSNZC,IUDMNZC", "CSVF": "TN", "UsingCodes": "Y", "VPD": "Y", "VFD": "N"},
+                           headers=UA, timeout=60, follow_redirects=True)
+        b = boe_points(r.text) if r.status_code == 200 else {}
+        out.update({"gov:uk5y": b.get("IUDSNZC", []), "gov:uk10y": b.get("IUDMNZC", []), "gov:ukpolicy": b.get("IUDBEDR", [])})
+    if "jp" in countries:
+        merged: dict[str, dict[str, float]] = {}
+        for url in (MOF_ALL, MOF):                              # the archive ends with last month, the other file is this month
+            r = await http.get(url, headers=UA, timeout=60)
+            if r.status_code == 200:
+                for tenor, pts in mof_points(r.content.decode("shift_jis", "ignore")).items():
+                    merged.setdefault(tenor, {}).update({d: v for d, v in pts if d >= since})
+        out.update({f"gov:jp{t}": sorted(merged.get(t, {}).items()) for t in ("2y", "5y", "10y")})
+    return out
 
 
 def _row(country, policy, policy_name, curve: dict[str, tuple[str, float]], gauge_tenor: str, source: str, url: str) -> dict:
@@ -146,17 +241,30 @@ async def collect(ctx) -> int:
     """Data hub: 2y and 10y per country plus the policy rates, so alerts and charts work on them."""
     from .datahub import _meta
     d = await world(ctx)
-    n = 0
+    n, metas = 0, {}
     for r in d.get("rows", []):
         key = {"United States": "us", "Euro area (AAA)": "ea", "United Kingdom": "uk", "Japan": "jp"}.get(r["country"])
         if not key:
             continue
         for tenor in ("2y", "5y", "10y"):
             if r.get(tenor) is not None and r.get("date"):
-                await ctx.db.run(ctx.db.upsert_series, _meta(f"gov:{key}{tenor}", f"{r['country']} {tenor} government yield",
-                                                             "Rates by country", r["source"], "rate", "%"), [(r["date"], r[tenor])])
+                m = metas[f"gov:{key}{tenor}"] = _meta(f"gov:{key}{tenor}", f"{r['country']} {tenor} government yield",
+                                                       "Rates by country", r["source"], "rate", "%")
+                await ctx.db.run(ctx.db.upsert_series, m, [(r["date"], r[tenor])])
                 n += 1
         if r.get("policy") is not None and r.get("policy_date"):
-            await ctx.db.run(ctx.db.upsert_series, _meta(f"gov:{key}policy", f"{r['country']} {r['policy_name']}",
-                                                         "Rates by country", r["source"], "rate", "%"), [(r["policy_date"], r["policy"])])
+            m = metas[f"gov:{key}policy"] = _meta(f"gov:{key}policy", f"{r['country']} {r['policy_name']}", "Rates by country",
+                                                  r["source"], "rate", "%")
+            await ctx.db.run(ctx.db.upsert_series, m, [(r["policy_date"], r["policy"])])
+    # series that only hold the latest values get their history once
+    thin = [i for i in metas if len(await ctx.db.run(ctx.db.observations, i, 60)) < 50]
+    if thin:
+        try:
+            hist = await history(ctx, {i[4:6] for i in thin})
+        except Exception as e:  # noqa: BLE001 - the latest values are stored; the history is tried again next time
+            log.warning("government yield history: %s", e)
+            hist = {}
+        for i in thin:
+            if hist.get(i):
+                await ctx.db.run(ctx.db.upsert_series, metas[i], hist[i])
     return n

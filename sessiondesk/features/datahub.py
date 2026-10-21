@@ -658,16 +658,58 @@ def source_url(series_id: str) -> str | None:
     return None
 
 
+# ------------------------------------------------------------------ how the page groups the series
+# The collectors name categories after their source; the page groups them by asset class, like a terminal's menu.
+# Display only: ids and stored categories stay as they are (alerts, desk tiles and the API address series by id).
+GROUPS = [
+    ("equities", "Equities", ["Americas", "Europe", "Asia-Pacific", "Middle East & Africa", "Index futures", "US sectors", "Your baskets"]),
+    ("rates", "Rates & credit", ["Government yields", "US rates (FRED)", "US yields intraday (Cboe)", "Credit & liquidity"]),
+    ("macro", "Macro", ["Inflation & growth"]),
+    ("fx", "FX & crypto", ["FX", "Crypto"]),
+    ("vol", "Volatility", ["Volatility indices", "Options implied volatility (30d ATM)"]),
+    ("energy", "Energy & commodities", ["Commodity futures", "Oil (EIA weekly)", "Gas (EIA weekly)", "Gas flows (ENTSOG)", AGSI_CATEGORY,
+                                        "Power (day-ahead)", "Tanker traffic (AIS)"]),
+    ("attention", "News attention", ["Attention (your news archive)"]),
+]
+RENAME = {"Rates": "US rates (FRED)", "Euro area": "Government yields", "Rates by country": "Government yields", "Futures": "Index futures",
+          "Commodities": "Commodity futures", "Volatility": "Volatility indices", "Implied volatility": "Options implied volatility (30d ATM)"}
+CBOE_YIELDS = {"mkt:^IRX", "mkt:^FVX", "mkt:^TNX", "mkt:^TYX"}
+DUPLICATE_OF = {"fred:DGS2": "gov:us2y", "fred:DGS10": "gov:us10y", "fred:DFF": "gov:uspolicy"}   # the same FRED numbers twice
+
+
+def place(series: dict) -> tuple[str, str]:
+    """(group key, category shown) of one series (pure, tested)."""
+    cat = "US yields intraday (Cboe)" if series["id"] in CBOE_YIELDS else RENAME.get(series.get("category"), series.get("category") or "Other")
+    return next((k for k, _, cats in GROUPS if cat in cats), "other"), cat
+
+
+def layout(rows: list[dict]) -> list[dict]:
+    """Groups in menu order, each with its categories in order and their series ids; duplicates left out, unknown
+    categories in 'Other' (pure, tested)."""
+    out = []
+    for key, label, cats in GROUPS + [("other", "Other", [])]:
+        mine = [r for r in rows if r["group"] == key and not r.get("duplicate_of")]
+        names = cats + sorted({r["shown_category"] for r in mine} - set(cats))
+        blocks = [{"name": c, "ids": sorted((r["id"] for r in mine if r["shown_category"] == c),
+                                            key=lambda i: next(r["name"] for r in mine if r["id"] == i).lower())} for c in names]
+        blocks = [b for b in blocks if b["ids"]]
+        if blocks:
+            out.append({"key": key, "label": label, "categories": blocks})
+    return out
+
+
 async def overview(ctx) -> dict:
     rows = []
     for s in await ctx.db.run(ctx.db.series_list):
         pts = await ctx.db.run(ctx.db.observations, s["id"], 90)
         a = assess(await ctx.db.run(ctx.db.observations, s["id"], 400), s["kind"]) if pts else None
+        group, shown = place(s)
         rows.append({**s, "url": source_url(s["id"]), "last": pts[-1][1] if pts else None, "day": pts[-1][0] if pts else None,
-                     "change": a["change"] if a else None, "z": a["z"] if a else None,
-                     "spark": [v for _, v in pts[-60:]]})
-    warnings = [w for w in await ctx.db.run(ctx.db.alerts, 60, "hub") if w["ts"] > time.time() - 3 * 86400]
-    return {"series": rows, "warnings": warnings, "z_warn": Z_WARN, "asof": time.time(),
+                     "change": a["change"] if a else None, "z": a["z"] if a else None, "group": group, "shown_category": shown,
+                     "duplicate_of": DUPLICATE_OF.get(s["id"]), "spark": [v for _, v in pts[-60:]]})
+    # warnings stored before a series was taken out of the warnings (warns()) stay in the log, not on the page
+    warnings = [w for w in await ctx.db.run(ctx.db.alerts, 60, "hub") if w["ts"] > time.time() - 3 * 86400 and warns(w.get("symbol") or "")]
+    return {"series": rows, "groups": layout(rows), "warnings": warnings, "z_warn": Z_WARN, "asof": time.time(),
             "note": "Every series is measured against its own history: z = (latest change - median) / robust spread of its last "
                     f"250 changes; |z| ≥ {Z_WARN:g} is flagged. Unusual is not the same as meaningful, and it says nothing "
                     "about what comes next."}

@@ -250,3 +250,21 @@ def test_monitor_contracts_and_shape():
     sp = {s["name"][:5]: s["value"] for s in m.spreads(["brent_wti", "gold_silver"], {"BZ=F": {"price": 110}, "CL=F": {"price": 100},
                                                                                        "GC=F": {"price": 4000}, "SI=F": {"price": 50}})}
     assert sp == {"Brent": 10, "Gold ": 80}
+
+
+def test_hub_groups_by_asset_class():
+    rows = [{"id": i, "name": n, "category": c} for i, n, c in [
+        ("mkt:^GSPC", "S&P 500", "Americas"), ("mkt:^TNX", "US 10y", "Rates"), ("fred:DGS10", "US 10y yield", "Rates"),
+        ("gov:us10y", "United States 10y government yield", "Rates by country"), ("fred:IRLTLT01DEM156N", "Germany 10y", "Euro area"),
+        ("iv:SPY", "SPY iv", "Implied volatility"), ("x:new", "Something new", "Brand new")]]
+    for r in rows:
+        r["group"], r["shown_category"] = datahub.place(r)
+        r["duplicate_of"] = datahub.DUPLICATE_OF.get(r["id"])
+    by = {r["id"]: (r["group"], r["shown_category"]) for r in rows}
+    assert by["mkt:^TNX"] == ("rates", "US yields intraday (Cboe)") and by["fred:IRLTLT01DEM156N"] == ("rates", "Government yields")
+    assert by["iv:SPY"] == ("vol", "Options implied volatility (30d ATM)") and by["x:new"] == ("other", "Brand new")
+    lay = datahub.layout(rows)
+    assert [g["key"] for g in lay] == ["equities", "rates", "vol", "other"]
+    rates = next(g for g in lay if g["key"] == "rates")
+    assert [c["name"] for c in rates["categories"]] == ["Government yields", "US yields intraday (Cboe)"]   # FRED DGS10 = gov:us10y, hidden
+    assert rates["categories"][0]["ids"] == ["fred:IRLTLT01DEM156N", "gov:us10y"]

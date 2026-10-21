@@ -50,6 +50,17 @@ def test_rates_world_parsers():
     assert round(row["gauge_bp"]) == 55 and round(row["s2s10"]) == 95
 
 
+def test_rates_world_history_parsers():
+    from sessiondesk.features import rates_world as rw
+    ecb = "KEY,FREQ,TIME_PERIOD,OBS_VALUE\nYC.X.SR_2Y,B,2026-10-19,2.05\nYC.X.SR_2Y,B,2026-10-16,2.01\nYC.X.SR_2Y,B,2026-10-20,bad\n"
+    assert rw.ecb_points(ecb) == {"YC.X.SR_2Y": [("2026-10-16", 2.01), ("2026-10-19", 2.05)]}
+    boe = "DATE,IUDBEDR,IUDMNZC\n15 Oct 2026,4.0,4.71\n16 Oct 2026,4.0,\n"
+    assert rw.boe_points(boe) == {"IUDBEDR": [("2026-10-15", 4.0), ("2026-10-16", 4.0)], "IUDMNZC": [("2026-10-15", 4.71)]}
+    mof = "Interest Rate,,,(Unit : %)\nDate,1Y,2Y,10Y\n1974/9/24,10.3,9.36,-\n2026/9/30,1.684,1.952,3.057\n"
+    assert rw.mof_points(mof) == {"1y": [("1974-09-24", 10.3), ("2026-09-30", 1.684)], "2y": [("1974-09-24", 9.36), ("2026-09-30", 1.952)],
+                                  "10y": [("2026-09-30", 3.057)]}
+
+
 def test_central_bank_schedule_parsers():
     from sessiondesk.features import centralbanks as cb
     fed = "<p>2026 FOMC Meetings</p><div>January</div><div>27-28</div><div>March</div><div>17-18*</div><p>2025 FOMC Meetings</p><div>December</div><div>9-10</div>"

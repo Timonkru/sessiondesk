@@ -285,3 +285,15 @@ table.grid caption .csvbtn:hover { color: var(--link); }
 .desk .linkbadge { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 3px; font-size: 11px; font-weight: 700; color: #fff; text-align: center; }
 .desk .linked-A .linkbadge { background: #4c8dff; } .desk .linked-A { border-left: 3px solid #4c8dff; }
 .desk .linked-B .linkbadge { background: #e8a33d; } .desk .linked-B { border-left: 3px solid #e8a33d; }
+/* Data hub: list and the chosen series side by side */
+.hubgrid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.hubgrid .hubdetail { position: sticky; top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; background: var(--bg); }
+.hubgrid .hubdetail h2 { margin: 0 0 2px; }
+.hubgrid .hublist section.block:first-child h2 { margin-top: 0; }
+.hubgrid table.grid tr.on td { background: var(--hi); }
+.hubdetail .kpis { display: flex; gap: 24px; margin: 8px 0; }
+.hubwarn { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 8px; font-size: 11px; background: var(--warn); color: #fff; }
+.hubwarnings { border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 4px; padding: 6px 10px; margin: 8px 0 12px; }
+.hubwarnings .feed { margin: 4px 0; }
+.hubgrid .hublist section.block { overflow-x: auto; }
+@media (max-width: 1000px) { .hubgrid { grid-template-columns: minmax(0, 1fr); } .hubgrid .hubdetail { position: static; order: -1; } }
