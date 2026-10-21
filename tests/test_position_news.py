@@ -79,3 +79,12 @@ def test_market_filter_tags():
 def test_news_api_market_filter(client):
     d = client.get("/api/news?market=agri").json()
     assert d["items"] == [] and any(m["key"] == "agri" for m in d["markets"])
+
+
+def test_alpaca_stream_frames():
+    from sessiondesk.features import newsstream
+    news, control = newsstream.parse_alpaca('[{"T":"success","msg":"authenticated"},{"T":"n","id":24918784,"headline":"Fed holds",'
+                                            '"created_at":"2026-10-21T13:00:02Z","symbols":["SPY"],"source":"benzinga"}]')
+    assert [n["headline"] for n in news] == ["Fed holds"] and control[0]["msg"] == "authenticated"
+    assert newsstream.parse_alpaca("not json") == ([], [])
+    assert newsstream.parse_alpaca('{"T":"error","code":402,"msg":"auth failed"}')[1][0]["code"] == 402

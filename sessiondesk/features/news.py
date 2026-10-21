@@ -236,4 +236,5 @@ async def list_news(ctx, group: str | None, q: str | None, impact: str | None, s
     if market:
         rows = [r for r in rows if market in r["markets"]][:limit]
     rss = ctx.hub.get("rss")
-    return {"items": rows, "feed_errors": dict(rss.errors) if rss else {}, "fts": ctx.db.fts, "markets": market_list()}
+    return {"items": rows, "feed_errors": dict(rss.errors) if rss else {}, "fts": ctx.db.fts, "markets": market_list(),
+            "streams": (ctx.extras.get("newsstream") or {})}

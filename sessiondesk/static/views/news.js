@@ -32,6 +32,7 @@ export async function render(root, _params, ctx) {
     const li = h("li", { class: (n.impact === "high" ? "high " : "") + (fresh ? "fresh " : "") + "click" },
       h("div", { class: "t" }, n.title),
       h("div", { class: "m" }, `${day(n.published)} ${clock(n.published)} · ${n.source}`,
+        /Google News/.test(n.source || "") ? h("span", { class: "muted", title: "Google News lists these headlines hours after publication - context, not breaking news" }, " · delayed") : "",
         n.impact !== "normal" ? h("span", { class: n.impact === "high" ? "imp" : "" }, ` · ${n.impact}${n.tags && n.tags.length ? ": " + n.tags[0] : ""}`) : "",
         (n.held || []).length ? [" · open: ", h("strong", null, n.held.join(", "))] : "",
         (n.symbols || []).length ? [" · ", ...n.symbols.slice(0, 5).flatMap((s, i) => [i ? ", " : "", h("a", { href: "#/stock/" + encodeURIComponent(s) }, s)])] : ""),
@@ -67,7 +68,8 @@ export async function render(root, _params, ctx) {
     if (!items.length) list.appendChild(h("li", { class: "muted" }, query ? "No match in the archive." : "No headlines yet - the feeds are polled in the background (first fill takes a few seconds after start)."));
     const errs = Object.keys(d.feed_errors || {});
     const mlabel = market ? marketSel.selectedOptions[0]?.textContent : "";
-    info.textContent = `${items.length} headlines` + (mlabel ? ` on ${mlabel}` : "") + (query ? ` matching “${query}”` : "") + (errs.length ? ` · feeds failing: ${errs.join(", ")}` : "") +
+    const st = (d.streams || {}).alpaca;
+    info.textContent = (st && st.status === "live" ? `Benzinga live stream on (${st.received} since start) · ` : "") + `${items.length} headlines` + (mlabel ? ` on ${mlabel}` : "") + (query ? ` matching “${query}”` : "") + (errs.length ? ` · feeds failing: ${errs.join(", ")}` : "") +
       " · High impact = rule-based triage (central banks, top-tier data, geopolitics, tariffs, market structure); it is not a signal.";
     ctx.setContext({ page: "News" + (query ? ` search “${query}”` : ` (${filter})`) + (market ? ` · market ${market}` : ""), headlines: items.slice(0, 60).map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact, symbols: n.symbols })) });
   };

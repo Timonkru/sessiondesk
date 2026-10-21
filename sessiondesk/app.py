@@ -960,6 +960,13 @@ def market_hours(now: float | None = None) -> bool:
     return t.weekday() < 5 and 7 <= t.hour < 21          # Europe open .. US close (UTC), broad on purpose
 
 
+async def _news_stream_loop(ctx):
+    """Benzinga news over Alpaca's websocket; idles until Alpaca keys are entered."""
+    from .features import newsstream
+    await asyncio.sleep(20)
+    await newsstream.run_alpaca(ctx)
+
+
 async def _tanker_loop(ctx):
     """AIS websocket for the tanker monitor; idles until the user enters an aisstream.io key."""
     from .features import tankers
@@ -1144,4 +1151,5 @@ def background(ctx) -> list:
         ctx.extras["jobs"].scheduler(),
         ctx.extras["push"].run(),
         _tanker_loop(ctx),
+        _news_stream_loop(ctx),
     ]
