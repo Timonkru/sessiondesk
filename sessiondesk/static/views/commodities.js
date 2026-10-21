@@ -19,7 +19,9 @@ const PERIODS = [["1d", "1 day"], ["1w", "1 week"], ["1m", "1 month"], ["3m", "3
 
 export async function render(root, _params, ctx) {
   const body = h("div", null, loading());
-  root.append(h("div", { class: "pagehead" }, h("h1", null, "Commodities & energy"), h("span", { class: "meta" }, "prices, inventories, flows")), body);
+  root.append(h("div", { class: "pagehead" }, h("h1", null, "Commodities & energy"), h("span", { class: "meta" }, "prices, inventories, flows")),
+    h("p", null, "Monitors: ", h("a", { href: "#/monitor/oil" }, "Crude oil"), " · ", h("a", { href: "#/monitor/gas" }, "Natural gas & power"), " · ",
+      h("a", { href: "#/monitor/gold" }, "Gold & precious metals"), h("span", { class: "small muted" }, " - curve, inventories, positioning, releases and headlines on one page")), body);
   const d = await api("/api/commodities", { ttl: 300000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
   const left = h("div"), right = h("div");

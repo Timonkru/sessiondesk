@@ -234,3 +234,19 @@ def test_iv30_interpolation_and_hours():
     assert datahub.us_options_live(dt.datetime(2026, 10, 20, 15, 0, tzinfo=dt.timezone.utc))
     assert not datahub.us_options_live(dt.datetime(2026, 10, 20, 7, 0, tzinfo=dt.timezone.utc))
     assert not datahub.us_options_live(dt.datetime(2026, 10, 24, 15, 0, tzinfo=dt.timezone.utc))      # Saturday
+
+
+def test_monitor_contracts_and_shape():
+    import datetime as dt
+    from sessiondesk.features import monitors as m
+    cl = m.contracts("CL", ".NYM", dt.date(2026, 10, 21), 1, 20, None, 3)
+    assert [s for s, _ in cl] == ["CLZ26.NYM", "CLF27.NYM", "CLG27.NYM"] and cl[0][1] == "Dec 26"        # after the 20th: Dec is front
+    assert m.contracts("CL", ".NYM", dt.date(2026, 10, 5), 1, 20, None, 1)[0][0] == "CLX26.NYM"
+    gc = m.contracts("GC", ".CMX", dt.date(2026, 10, 21), 1, 25, (2, 4, 6, 8, 10, 12), 3)
+    assert [s for s, _ in gc] == ["GCZ26.CMX", "GCG27.CMX", "GCJ27.CMX"]
+    sh = m.curve_shape([("Dec", 100.0), ("Jan", 98.0), ("Feb", 97.0)])
+    assert sh["state"] == "backwardation" and round(sh["m2"], 1) == -2.0
+    assert m.year_ago([("2025-10-20", 5.0), ("2026-04-01", 7.0), ("2026-10-20", 9.0)]) == 5.0
+    sp = {s["name"][:5]: s["value"] for s in m.spreads(["brent_wti", "gold_silver"], {"BZ=F": {"price": 110}, "CL=F": {"price": 100},
+                                                                                       "GC=F": {"price": 4000}, "SI=F": {"price": 50}})}
+    assert sp == {"Brent": 10, "Gold ": 80}

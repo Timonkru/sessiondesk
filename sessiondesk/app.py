@@ -545,6 +545,15 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
             return await countries.page(ctx, key)
         return await ctx.cache.get(f"country:{key}", 60, build)
 
+    @app.get("/api/monitor/{key}")
+    async def get_monitor(key: str):
+        from .features import monitors
+        ctx = C()
+
+        async def build():
+            return await monitors.monitor(ctx, key)
+        return await ctx.cache.get(f"monitor:{key}", 60, build)
+
     @app.get("/api/portfolio")
     async def get_portfolio():
         from .features import portfolio

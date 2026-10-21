@@ -24,6 +24,8 @@ async function overview(c) {
     const hit = (u.items || []).find((x) => x.symbol === c.symbol);
     if (hit) clear(memberLink, h("p", null, h("a", { href: "#/indices/" + hit.key }, `${hit.name}: ${hit.members} members, breadth, drivers and valuation →`)));
   });
+  const MON = { "CL=F": "oil", "BZ=F": "oil", "RB=F": "oil", "HO=F": "oil", "USO": "oil", "NG=F": "gas", "TTF=F": "gas", "GC=F": "gold", "SI=F": "gold", "GLD": "gold" };
+  if (MON[c.symbol]) memberLink.append(h("p", null, h("a", { href: "#/monitor/" + MON[c.symbol] }, "Monitor: curve, inventories, positioning, releases, headlines →")));
   api(`/api/stock/${c.enc}/news`, { ttl: 60000 }).then((d) => {
     const items = [...(d.wire || []), ...(d.items || [])].sort((x, y) => (y.published || 0) - (x.published || 0)).slice(0, 5);
     c.state.blocks.headlines_latest = items.map((n) => ({ title: n.title, source: n.source, published: n.published, impact: n.impact }));
