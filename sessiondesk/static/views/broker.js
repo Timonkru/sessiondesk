@@ -79,16 +79,8 @@ export async function render(root, _params, ctx) {
   };
   let vpsFacts = [];
   const loadExtras = async () => {
-    const [bk, fx, sp] = await Promise.all([api("/api/book", { ttl: 30000 }), api("/api/fx/strength", { ttl: 30000 }), api("/api/specs", { ttl: 60000 })]);
-    const m = bk.matrix || [];
-    clear(bookBox, section("Open book: correlation and scenarios",
-      m.length > 1 ? h("div", { class: "scroll" }, table([{ label: "", render: (r) => `${r.asset} ${r.side}` },
-        ...m.map((c, i) => ({ label: `${c.asset} ${c.side[0]}`, num: true, render: (r) => { const v = r.values[i]; return v == null ? "–" : h("span", { class: v > 0.5 ? "warn" : v < -0.3 ? "up" : "" }, num(v, 2)); } }))], m))
-        : note(bk.note || "Fewer than two open markets - nothing to correlate."),
-      (bk.scenarios || []).length ? table([{ label: "Account", render: (r) => r.account }, { label: "If", render: (r) => `${r.driver} ${r.shock > 0 ? "+" : ""}${r.shock}%` },
-        { label: "Book P/L", num: true, cls: (r) => dir(r.total), render: (r) => num(r.total, 0) }, { label: "of equity", num: true, cls: (r) => dir(r.total_pct), render: (r) => (r.total_pct == null ? "–" : pct(r.total_pct, 2)) },
-        { label: "", render: (r) => (r.incomplete ? h("span", { class: "warn small" }, `${r.incomplete} position(s) without sensitivity or beta`) : "") }], bk.scenarios) : null,
-      bk.positions && bk.positions.length ? note(bk.note) : null));
+    const [fx, sp] = await Promise.all([api("/api/fx/strength", { ttl: 30000 }), api("/api/specs", { ttl: 60000 })]);
+    clear(bookBox, h("p", { class: "small" }, "Exposure, correlation of the open book and scenarios per account: ", h("a", { href: "#/portfolio" }, "Portfolio →")));
     clear(fxBox, section("Currency strength today", (fx.rows || []).length ? h("div", { class: "scroll" }, table(
       (fx.rows || []).map((r) => ({ label: r.currency, num: true, cls: () => dir(r.strength), render: () => pct(r.strength, 2) })), [0])) : note("No FX quotes."),
       note(`${fx.note || ""} Source: ${fx.source || "?"}.`)));
