@@ -253,8 +253,9 @@ class MT5Bridge(Connector):
             return {"ok": False, "detail": f"{len(folders)} folder(s), but no account files yet"}
         return {"ok": True, "detail": f"{len(accounts)} account(s), {len(fresh)} fresh" + ("" if fresh else " - is MetaTrader running?")}
 
-    async def account(self) -> list[dict]:
-        hide, out, seen = self._hide(), [], set()
+    async def account(self, masked: bool | None = None) -> list[dict]:
+        # masked=False: full account numbers whatever the privacy setting (a performance report asks for it)
+        hide, out, seen = self._hide() if masked is None else masked, [], set()
         for f in self._new("account"):
             for r in f["rows"]:
                 seen.add(r.get("login"))
@@ -326,8 +327,9 @@ class MT5Bridge(Connector):
                     out.setdefault(sym, q)
         return out
 
-    async def deals(self) -> list[dict]:
-        hide, out, seen = self._hide(), [], set()
+    async def deals(self, masked: bool | None = None) -> list[dict]:
+        # masked=False: full account numbers whatever the privacy setting (a performance report asks for it)
+        hide, out, seen = self._hide() if masked is None else masked, [], set()
         for f in self._new("deals"):
             seen.add(f["login"])
             for r in f["rows"]:

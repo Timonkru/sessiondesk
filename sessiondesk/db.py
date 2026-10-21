@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS series (
   id TEXT PRIMARY KEY, name TEXT, category TEXT, source TEXT, kind TEXT, unit TEXT, updated REAL);
 CREATE TABLE IF NOT EXISTS obs (
   series TEXT, day TEXT, value REAL, PRIMARY KEY (series, day));
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY, created REAL, account TEXT, period_from TEXT, period_to TEXT, data_sha TEXT, pdf_sha TEXT, csv_sha TEXT,
+  net REAL, net_pct REAL, currency TEXT, trades INTEGER, units TEXT);
 CREATE TABLE IF NOT EXISTS ai_usage (
   ts REAL, day TEXT, task TEXT, provider TEXT, model TEXT, tok_in INTEGER, tok_out INTEGER, cost REAL);
 """
@@ -54,6 +57,8 @@ class DB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
+        if "units" not in {r[1] for r in self._conn.execute("PRAGMA table_info(reports)")}:
+            self._conn.execute("ALTER TABLE reports ADD COLUMN units TEXT")
         self.fts = self._try_fts()
 
     def _try_fts(self) -> bool:
@@ -252,6 +257,19 @@ class DB:
     def day_starts(self) -> dict:
         """{(account, day): balance} of every stored day start."""
         return {(r["account"], r["day"]): r["balance"] for r in self._exec("SELECT account, day, balance FROM day_start") if r["balance"]}
+
+    # ------------------------------------------------------------ issued performance reports (register)
+    def report_add(self, r: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   tuple(r.get(k) for k in ("id", "created", "account", "period_from", "period_to", "data_sha", "pdf_sha", "csv_sha",
+                                            "net", "net_pct", "currency", "trades", "units")))
+
+    def report_find(self, sha: str) -> dict | None:
+        rows = self._exec("SELECT * FROM reports WHERE pdf_sha = ? OR csv_sha = ? OR data_sha = ?", (sha, sha, sha))
+        return rows[0] if rows else None
+
+    def reports(self, limit: int = 100) -> list[dict]:
+        return self._exec("SELECT * FROM reports ORDER BY created DESC LIMIT ?", (limit,))
 
     # ------------------------------------------------------------ activity feed
     def add_activity(self, kind: str, title: str, body: str = "", ref: str = "") -> None:

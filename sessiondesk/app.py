@@ -731,6 +731,38 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import journal
         return await journal.day_view(C(), day)
 
+    # ------------------------------------------------------------------ performance reports (PDF + CSV, register)
+    @app.get("/api/reports")
+    async def get_reports():
+        from .features import report
+        ctx = C()
+        return {**await report.accounts(ctx), "issued": await ctx.db.run(ctx.db.reports, 100)}
+
+    @app.post("/api/reports")
+    async def post_report(request: Request):
+        from .features import report
+        b = await request.json()
+        return await report.issue(C(), str(b.get("account") or ""), str(b.get("period") or "last_30"), b.get("from"), b.get("to"),
+                                  bool(b.get("full_number")), "percent" if b.get("units") == "percent" else "money")
+
+    @app.get("/api/reports/file/{name}")
+    async def get_report_file(name: str, view: bool = False):
+        import re as _re
+        m = _re.fullmatch(r"(SD-\d{8}-[0-9A-F]{8})\.(pdf|csv)", name)
+        path = C().data_dir / "reports" / name if m else None
+        if not path or not path.is_file():
+            return JSONResponse({"error": "no such report"}, status_code=404)
+        return Response(path.read_bytes(), media_type="application/pdf" if m.group(2) == "pdf" else "text/csv",
+                        headers={"Content-Disposition": f'{"inline" if view else "attachment"}; filename="{name}"'})
+
+    @app.post("/api/reports/verify")
+    async def post_report_verify(request: Request):
+        from .features import report
+        data = await request.body()
+        if not data or len(data) > 20_000_000:
+            return {"error": "send the PDF or CSV file (up to 20 MB) as the request body"}
+        return await report.verify(C(), data)
+
     @app.post("/api/journal")
     async def set_journal(request: Request):
         body = await request.json()
