@@ -107,3 +107,70 @@ def test_same_second_deals_are_one_step():
              {"time": T0 + 120, "position_id": "b", "symbol": "X", "type": "SELL", "entry": "1", "volume": 1, "net": 300.0}]
     r = report.build(deals, {"label": "1", "currency": "USD", "balance": 1000.0}, T0, T0 + DAY, now=T0 + DAY)
     assert r["max_dd"] == 0 and r["net"] == 0                 # a hedge closed in one second is no drawdown
+
+
+def _cash():
+    return [{"ticket": "900", "time": T0 + 7300, "type": "TAX", "amount": -78.07, "comment": "tax"},          # 26.375 % of 296
+            {"ticket": "901", "time": T0 + DAY + 5000, "type": "TAX", "amount": 132.40, "comment": "tax refund"},
+            {"ticket": "902", "time": T0 + 1.5 * DAY, "type": "BALANCE", "amount": 5000.0, "comment": "deposit"},
+            {"ticket": "903", "time": T0 + 2 * DAY, "type": "CHARGE", "amount": -3.0, "comment": "data fee"}]
+
+
+def test_report_with_tax_and_deposit():
+    r = report.build(_deals(), {"label": "123456", "currency": "EUR", "balance": 15_000.0}, T0, T0 + 3 * DAY, now=T0 + 3 * DAY, cash=_cash())
+    trades_since = -4 + 300 - 2 - 500 - 2
+    assert r["start_balance"] == 15_000 - trades_since - (-78.07 + 132.40 + 5000 - 3)          # exact, bookings included
+    assert r["net"] == trades_since - 3                                                         # result before tax: trades + fee
+    assert round(r["taxes"], 2) == 54.33 and r["deposits"] == 5000 and r["dietz"]
+    denom = r["start_balance"] + 5000 * 1.5 / 3                                                 # deposit there for half the period
+    assert abs(r["net_pct"] - r["net"] / denom * 100) < 1e-9
+    assert abs(r["after_tax_pct"] - (r["net"] + r["taxes"]) / denom * 100) < 1e-9
+    assert r["curve"][-1][1] == r["start_balance"] + r["net"]                                   # no tax, no deposit in the path
+    assert sum(d["tax"] for d in r["days"]) == r["taxes"]
+    fp = report.fingerprint(report.data_block(r))
+    text = report.to_csv(r, report.report_id(r, fp), fp)
+    assert "booking_id,time_utc,type,amount" in text and report.verify_csv(text)["ok"]
+    assert not report.verify_csv(text.replace(",TAX,-78.07", ",TAX,-7.81"))["ok"]              # a changed tax shows
+    raw = report.to_pdf(r, "SD-X", fp)
+    pdf = "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(raw)).pages)
+    assert "Taxes and other balance bookings" in pdf and "Return after tax" in pdf and "Modified Dietz" in pdf
+
+
+def test_balance_check_counts_bookings_and_compare():
+    deals, cash = _deals(), _cash()
+    t = dt.datetime(2026, 10, 2, tzinfo=dt.timezone.utc).timestamp()
+    true = 15_000.0 - sum(d["net"] for d in deals if d["time"] >= t) - sum(c["amount"] for c in cash if c["time"] >= t)
+    assert report.balance_check(deals, 15_000.0, {"2026-10-02": true}, cash=cash)["worst"] is None
+    assert report.balance_check(deals, 15_000.0, {"2026-10-02": true})["worst"] is not None      # without the bookings it misses
+    old = {"account": "1", "positions": [["2", "a", "b", "X", "long", 1.0, 296.0]], "cash": []}
+    assert report.compare_blocks(old, old) == []
+    new = {**old, "positions": [["2", "a", "b", "X", "long", 1.0, 290.0]]}
+    assert report.compare_blocks(old, new) == ["1 position(s) with other values: 2"]
+
+
+def test_tax_months_and_estimate():
+    from sessiondesk.features import taxes
+    deals = [{"time": T0 + 3600, "net": 400.0}, {"time": T0 + 40 * DAY, "net": -100.0}]
+    cash = [{"time": T0 + 4000, "type": "TAX", "amount": -105.5}, {"time": T0 + 40 * DAY + 10, "type": "TAX", "amount": 26.38},
+            {"time": T0 + 5000, "type": "BALANCE", "amount": 2000.0}, {"time": T0 + 6000, "type": "CHARGE", "amount": -5.0}]
+    rows = {m["month"]: m for m in taxes.months(deals, cash, 2026)}
+    oct_, nov = rows["2026-10"], rows["2026-11"]
+    assert oct_["result"] == 395 and oct_["withheld"] == -105.5 and oct_["deposits"] == 2000 and oct_["fees"] == -5
+    assert round(oct_["rate"], 2) == round(105.5 / 395 * 100, 2) and oct_["after_tax"] == 395 - 105.5
+    assert nov["refunded"] == 26.38 and nov["rate"] is None                     # a loss month: refund, no rate
+    # estimate without bookings: the non-trade change between recorded day starts
+    t1 = dt.datetime(2026, 10, 2, tzinfo=dt.timezone.utc).timestamp()
+    deals2 = [{"time": t1 + 3600, "net": 300.0}]
+    est = taxes.estimate(deals2, 10_220.0, {"2026-10-02": 10_000.0})              # 300 traded, balance only +220: -80 not trades
+    assert len(est) == 1 and round(est[0]["non_trade"], 2) == -80.0 and est[0]["to"] == "now"
+
+
+def test_recheck_explains_a_moved_start_balance():
+    pos = [["1", "a", "b", "X", "long", 1.0, 100.0], ["2", "a", "b", "X", "short", 1.0, -40.0]]
+    old = {"start_balance": 1000.0, "end_balance": 1060.0, "positions": pos}
+    assert "identical" in report.explain(old, {**old, "start_balance": 989.37, "end_balance": 1049.37})
+    assert report.explain(old, {**old, "start_balance": 989.37, "end_balance": 1060.0}) is None          # not one booking
+    pct_old = {"return_pct": 6.0, "positions": [["1", "a", "b", "X", "long", "", 10.0], ["2", "a", "b", "X", "short", "", -4.0]]}
+    pct_new = {"return_pct": 6.1, "positions": [["1", "a", "b", "X", "long", "", 10.1], ["2", "a", "b", "X", "short", "", -4.04]]}
+    assert "same factor" in report.explain(pct_old, pct_new)
+    assert report.explain(pct_old, {**pct_new, "positions": [["1", "a", "b", "X", "long", "", 10.1], ["2", "a", "b", "X", "short", "", -5.0]]}) is None

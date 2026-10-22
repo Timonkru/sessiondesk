@@ -1,7 +1,8 @@
 //+------------------------------------------------------------------+
 //| SessionDeskBridge.mq5                                            |
 //| Read-only exporter: account, positions, running EAs, quotes,     |
-//| closed deals and the economic calendar (with actual values) for  |
+//| closed deals, cash bookings (tax, deposits, fees), the economic |
+//| calendar (with actual values) for                                |
 //| SessionDesk. Attach ONCE per terminal to any chart.              |
 //|                                                                  |
 //| This program never sends, modifies or closes an order. It uses   |
@@ -11,16 +12,16 @@
 //| License: MIT                                                     |
 //+------------------------------------------------------------------+
 #property strict
-#property version     "1.10"
+#property version     "1.20"
 #property description "Read-only data bridge for SessionDesk (account, positions, EAs, quotes, specs, deals, calendar + history)."
 
 input int  InpFastSeconds      = 2;     // positions / account / calendar-change check (seconds)
 input int  InpSlowSeconds      = 60;    // full calendar, deals, running EAs (seconds)
-input int  InpDealDays         = 30;    // closed-deal history to export (days)
+input int  InpDealDays         = 100;   // deal history to export (days) - a monthly report needs the whole last month
 input int  InpMaxQuotes        = 200;   // max Market Watch symbols exported
 input bool InpExportCalendar   = true;  // only one terminal needs this; harmless if several do
 
-#define BRIDGE_VERSION "1.10"
+#define BRIDGE_VERSION "1.20"
 string   g_folder = "SessionDesk\\";
 ulong    g_calendar_change = 0;
 datetime g_last_slow = 0;
@@ -191,6 +192,32 @@ void ExportQuotes()
    Publish("quotes_" + IntegerToString(login) + ".tsv", body);
 }
 
+//--- deal type -> exported name; "" = skip. Besides BUY/SELL the cash bookings a statement shows: deposits and
+//--- withdrawals (BALANCE), credit, charges, corrections, bonus, commissions billed apart, interest, dividends, tax.
+string DealKind(long type)
+{
+   switch((int)type)
+   {
+      case DEAL_TYPE_BUY:                      return "BUY";
+      case DEAL_TYPE_SELL:                     return "SELL";
+      case DEAL_TYPE_BALANCE:                  return "BALANCE";
+      case DEAL_TYPE_CREDIT:                   return "CREDIT";
+      case DEAL_TYPE_CHARGE:                   return "CHARGE";
+      case DEAL_TYPE_CORRECTION:               return "CORRECTION";
+      case DEAL_TYPE_BONUS:                    return "BONUS";
+      case DEAL_TYPE_COMMISSION:
+      case DEAL_TYPE_COMMISSION_DAILY:
+      case DEAL_TYPE_COMMISSION_MONTHLY:
+      case DEAL_TYPE_COMMISSION_AGENT_DAILY:
+      case DEAL_TYPE_COMMISSION_AGENT_MONTHLY: return "COMMISSION";
+      case DEAL_TYPE_INTEREST:                 return "INTEREST";
+      case DEAL_DIVIDEND:
+      case DEAL_DIVIDEND_FRANKED:              return "DIVIDEND";
+      case DEAL_TAX:                           return "TAX";
+   }
+   return "";
+}
+
 void ExportDeals()
 {
    long login = AccountInfoInteger(ACCOUNT_LOGIN);
@@ -199,24 +226,26 @@ void ExportDeals()
    datetime from = to - InpDealDays * 86400;
    if(!HistorySelect(from, to)) return;
    string body = Header("deals");
-   body += "ticket\ttime_utc\tsymbol\ttype\tentry\tvolume\tprice\tprofit\tcommission\tswap\tmagic\tposition_id\tcomment\n";
+   body += "ticket\ttime_utc\tsymbol\ttype\tentry\tvolume\tprice\tprofit\tcommission\tswap\tmagic\tposition_id\tcomment\tfee\n";
    int n = HistoryDealsTotal();
    for(int i = 0; i < n; i++)
    {
       ulong t = HistoryDealGetTicket(i);
       if(t == 0) continue;
       long type = HistoryDealGetInteger(t, DEAL_TYPE);
-      if(type != DEAL_TYPE_BUY && type != DEAL_TYPE_SELL) continue;
+      string kind = DealKind(type);                    // trades and the cash bookings (tax, deposits, fees, dividends)
+      if(kind == "") continue;
       string sym = HistoryDealGetString(t, DEAL_SYMBOL);
-      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      int digits = sym == "" ? 2 : (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
       body += IntegerToString((long)t) + "\t" + IntegerToString((long)HistoryDealGetInteger(t, DEAL_TIME) - offset)
-            + "\t" + sym + "\t" + (type == DEAL_TYPE_BUY ? "BUY" : "SELL")
+            + "\t" + sym + "\t" + kind
             + "\t" + IntegerToString(HistoryDealGetInteger(t, DEAL_ENTRY))
             + "\t" + D(HistoryDealGetDouble(t, DEAL_VOLUME), 2) + "\t" + D(HistoryDealGetDouble(t, DEAL_PRICE), digits)
             + "\t" + D(HistoryDealGetDouble(t, DEAL_PROFIT), 2) + "\t" + D(HistoryDealGetDouble(t, DEAL_COMMISSION), 2)
             + "\t" + D(HistoryDealGetDouble(t, DEAL_SWAP), 2) + "\t" + IntegerToString(HistoryDealGetInteger(t, DEAL_MAGIC))
             + "\t" + IntegerToString(HistoryDealGetInteger(t, DEAL_POSITION_ID))
-            + "\t" + Clean(HistoryDealGetString(t, DEAL_COMMENT)) + "\n";
+            + "\t" + Clean(HistoryDealGetString(t, DEAL_COMMENT))
+            + "\t" + D(HistoryDealGetDouble(t, DEAL_FEE), 2) + "\n";
    }
    Publish("deals_" + IntegerToString(login) + ".tsv", body);
 }

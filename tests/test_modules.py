@@ -183,3 +183,22 @@ def test_research_recommendations_say_why():
     assert why["A history of"] == ["topic you saved before: japan"]
     assert "ECB minutes," not in why                                   # older than 14 days
     assert rec[0]["title"].startswith("What the ECB")                 # positions weigh most
+
+
+def test_bridge_120_cash_bookings(tmp_path):
+    cols = ["ticket", "time_utc", "symbol", "type", "entry", "volume", "price", "profit", "commission", "swap", "magic", "position_id",
+            "comment", "fee"]
+    _write(tmp_path, "deals_52000123.tsv", "deals", cols, [
+        ["11", "100", "GER40", "BUY", "0", "1.00", "24000", "0", "-2", "0", "0", "11", "", "-0.5"],
+        ["12", "200", "GER40", "SELL", "1", "1.00", "24050", "50", "-2", "0", "0", "11", "", "0"],
+        ["13", "210", "", "TAX", "0", "0", "0", "-11.86", "0", "0", "0", "0", "Tax", "0"],
+        ["14", "300", "", "BALANCE", "0", "0", "0", "1000", "0", "0", "0", "0", "Deposit", "0"]])
+    _write(tmp_path, "deals_52000999.tsv", "deals", cols[:-1], [["21", "100", "US30", "BUY", "0", "1", "1", "0", "0", "0", "0", "21", ""]])
+    settings = SimpleNamespace(get=lambda key, default=None: {"connectors.mt5.folder": str(tmp_path), "privacy.mask_accounts": False}.get(key, default))
+    conn = MT5Bridge(SimpleNamespace(settings=settings, secrets=None))
+    import asyncio
+    deals = asyncio.run(conn.deals())
+    assert {d["type"] for d in deals} == {"BUY", "SELL"} and next(d for d in deals if d["ticket"] == "11")["net"] == -2.5   # fee counted
+    book = asyncio.run(conn.cash())
+    assert book["covered"] == ["52000123"]                       # the older export (no fee column) carries no bookings
+    assert [(c["type"], c["amount"]) for c in book["rows"]] == [("TAX", -11.86), ("BALANCE", 1000.0)]

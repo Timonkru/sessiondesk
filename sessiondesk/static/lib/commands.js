@@ -24,7 +24,7 @@ export const PAGES = {
   BSKT: ["#/baskets", "Baskets"], HUB: ["#/hub", "Data hub"], ECST: ["#/macro", "Macro"], MACRO: ["#/macro", "Macro"], CMDTY: ["#/commodities", "Commodities & energy"],
   WIRP: ["#/centralbanks", "Central banks"], CBANKS: ["#/centralbanks", "Central banks"], CRUDE: ["#/monitor/oil", "Crude oil monitor"], NATGAS: ["#/monitor/gas", "Gas & power monitor"],
   BULLION: ["#/monitor/gold", "Gold monitor"], TANK: ["#/tankers", "Tankers (AIS)"], ALRT: ["#/alerts", "Alerts"], DESK: ["#/desk", "My desk"], PORT: ["#/portfolio", "Portfolio"],
-  JRNL: ["#/journal", "Journal"], REPORT: ["#/reports", "Reports"], RSRCH: ["#/research", "Research"], HELP: ["#/help", "Help"],
+  JRNL: ["#/journal", "Journal"], REPORT: ["#/reports", "Reports"], TAXES: ["#/taxes", "Taxes"], RSRCH: ["#/research", "Research"], HELP: ["#/help", "Help"],
 };
 // index names and Bloomberg tickers -> bundled universe key
 export const INDEX_ALIASES = {

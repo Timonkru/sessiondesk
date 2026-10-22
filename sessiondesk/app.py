@@ -755,6 +755,19 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return Response(path.read_bytes(), media_type="application/pdf" if m.group(2) == "pdf" else "text/csv",
                         headers={"Content-Disposition": f'{"inline" if view else "attachment"}; filename="{name}"'})
 
+    @app.post("/api/reports/{rid}/recheck")
+    async def post_report_recheck(rid: str):
+        from .features import report
+        import re as _re
+        if not _re.fullmatch(r"SD-\d{8}-[0-9A-F]{8}", rid):
+            return {"error": "unknown report id"}
+        return await report.recheck(C(), rid)
+
+    @app.get("/api/taxes")
+    async def get_taxes(year: int | None = None):
+        from .features import taxes
+        return await taxes.view(C(), year)
+
     @app.post("/api/reports/verify")
     async def post_report_verify(request: Request):
         from .features import report

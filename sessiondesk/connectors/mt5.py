@@ -53,7 +53,7 @@ def mask(login: str, on: bool) -> str:
 
 # ------------------------------------------------------------------ readers (pure, tested)
 def read_tsv(path: Path) -> dict | None:
-    """SessionDeskBridge format -> {'version', 'kind', 'ts', 'offset', 'login', 'rows': [dict]} or None."""
+    """SessionDeskBridge format -> {'version', 'kind', 'ts', 'offset', 'login', 'rows': [dict], 'columns'} or None."""
     try:
         text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
@@ -70,7 +70,8 @@ def read_tsv(path: Path) -> dict | None:
             parts += [""] * (len(cols) - len(parts))
         rows.append(dict(zip(cols, parts)))
     try:
-        return {"version": head[1], "kind": head[2], "ts": int(head[3]), "offset": int(head[4]), "login": head[5], "rows": rows}
+        return {"version": head[1], "kind": head[2], "ts": int(head[3]), "offset": int(head[4]), "login": head[5], "rows": rows,
+                "columns": cols}
     except (IndexError, ValueError):
         return None
 
@@ -144,6 +145,11 @@ def legacy_quotes(data: dict) -> dict:
                      "change_pct": (mid / prev - 1) * 100 if prev and prev > 0 else None,
                      "time": ts - offset if ts is not None and offset is not None else None, **levels}
     return out
+
+
+def deal_net(r: dict) -> float:
+    """Money a deal moved on the balance: profit + commission + swap + fee (fee from bridge 1.20) (pure)."""
+    return sum(num(r.get(k)) or 0 for k in ("profit", "commission", "swap", "fee"))
 
 
 def legacy_deals(data: dict, login: str) -> list[dict]:
@@ -328,15 +334,16 @@ class MT5Bridge(Connector):
         return out
 
     async def deals(self, masked: bool | None = None) -> list[dict]:
-        # masked=False: full account numbers whatever the privacy setting (a performance report asks for it)
+        """Trades (BUY/SELL deals). masked=False: full account numbers whatever the privacy setting (a report asks for it)."""
         hide, out, seen = self._hide() if masked is None else masked, [], set()
         for f in self._new("deals"):
             seen.add(f["login"])
             for r in f["rows"]:
+                if r.get("type") not in ("BUY", "SELL"):
+                    continue                                    # cash bookings: see cash()
                 out.append({"account": mask(f["login"], hide), "ticket": r.get("ticket"), "time": num(r.get("time_utc")),
                             "symbol": r.get("symbol"), "type": r.get("type"), "entry": r.get("entry"),
-                            "volume": num(r.get("volume")), "price": num(r.get("price")),
-                            "net": (num(r.get("profit")) or 0) + (num(r.get("commission")) or 0) + (num(r.get("swap")) or 0),
+                            "volume": num(r.get("volume")), "price": num(r.get("price")), "net": deal_net(r),
                             "magic": r.get("magic"), "position_id": r.get("position_id")})
         for login, data in self._old("deals", "deals"):
             if login in seen:
@@ -346,6 +353,22 @@ class MT5Bridge(Connector):
                 d.pop("login", None)
                 out.append(d)
         return out
+
+    async def cash(self, masked: bool | None = None) -> dict:
+        """Balance bookings that are not trades - deposits/withdrawals, tax, charges, commissions billed apart, interest,
+        dividends - from bridge 1.20 on. covered = accounts whose export carries them (older exports do not: there the
+        absence of a booking proves nothing)."""
+        hide, rows, covered = self._hide() if masked is None else masked, [], []
+        for f in self._new("deals"):
+            if "fee" not in (f.get("columns") or []):       # bridge < 1.20 exported trades only
+                continue
+            covered.append(mask(f["login"], hide))
+            for r in f["rows"]:
+                if r.get("type") in ("BUY", "SELL"):
+                    continue
+                rows.append({"account": mask(f["login"], hide), "ticket": r.get("ticket"), "time": num(r.get("time_utc")),
+                             "type": r.get("type"), "amount": deal_net(r), "comment": r.get("comment") or ""})
+        return {"rows": rows, "covered": covered}
 
     async def calendar(self, start: float | None = None, end: float | None = None) -> list[dict]:
         rows = []

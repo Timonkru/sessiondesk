@@ -73,24 +73,44 @@ def max_drawdown(curve: list[float]) -> tuple[float, float]:
     return dd, dd_pct
 
 
-def build(deals: list[dict], account: dict, start: float, end: float, now: float | None = None) -> dict:
-    """The report's figures. deals: this account's deals ({time, position_id, symbol, type BUY|SELL, entry 0|1|2|3,
-    volume, net}); account: {label, currency, balance, server, company}."""
+# Cash bookings (bridge 1.20+): what each type counts as. "result" = part of the trading result before tax (fees billed
+# apart, financing interest, dividend adjustments on index CFDs); "tax" and "flow" (deposits, withdrawals, credit) are
+# shown apart and never counted as result; "other" (corrections) moves the balance but is not counted either.
+CASH_CLASS = {"TAX": "tax", "BALANCE": "flow", "CREDIT": "flow", "BONUS": "flow", "CHARGE": "result", "COMMISSION": "result",
+              "INTEREST": "result", "DIVIDEND": "result", "CORRECTION": "other"}
+
+
+def build(deals: list[dict], account: dict, start: float, end: float, now: float | None = None,
+          cash: list[dict] | None = None) -> dict:
+    """The report's figures. deals: this account's trades ({time, position_id, symbol, type BUY|SELL, entry 0|1|2|3,
+    volume, net}); account: {label, currency, balance, server, company}; cash: its other balance bookings
+    ({time, type, amount, comment, ticket}) or None when the export does not carry them."""
     now = now or time.time()
     balance = account.get("balance") or 0.0
-    after_start = sum(d.get("net") or 0 for d in deals if (d.get("time") or 0) >= start)
-    after_end = sum(d.get("net") or 0 for d in deals if (d.get("time") or 0) >= end)
-    start_bal, end_bal = balance - after_start, balance - after_end
-    in_period = sorted((d for d in deals if start <= (d.get("time") or 0) < end), key=lambda d: d.get("time") or 0)
-    curve, days = [(start, start_bal)], defaultdict(lambda: {"net": 0.0, "trades": 0})
+    known = cash is not None
+    cash = sorted(cash or [], key=lambda c: c.get("time") or 0)
+    moves = [(d.get("time") or 0, d.get("net") or 0) for d in deals] + [(c.get("time") or 0, c.get("amount") or 0) for c in cash]
+    start_bal = balance - sum(v for t, v in moves if t >= start)
+    end_bal = balance - sum(v for t, v in moves if t >= end)
+    in_cash = [c for c in cash if start <= (c.get("time") or 0) < end]
+    sums = defaultdict(float)
+    for c in in_cash:
+        sums[CASH_CLASS.get(c.get("type"), "other")] += c.get("amount") or 0
+    # the performance path: trades and result bookings only - taxes, deposits and withdrawals do not move it
+    perf = sorted([(d["time"], d.get("net") or 0) for d in deals if start <= (d.get("time") or 0) < end]
+                  + [(c["time"], c.get("amount") or 0) for c in in_cash if CASH_CLASS.get(c.get("type")) == "result"])
+    curve, days = [(start, start_bal)], defaultdict(lambda: {"net": 0.0, "trades": 0, "tax": 0.0})
     run = start_bal
-    for d in in_period:
-        run += d.get("net") or 0
-        if curve[-1][0] == d["time"] and len(curve) > 1:
-            curve[-1] = (d["time"], run)                # deals of the same second are one step: their order must not make a drawdown
+    for t, v in perf:
+        run += v
+        if curve[-1][0] == t and len(curve) > 1:
+            curve[-1] = (t, run)                       # deals of the same second are one step: their order must not make a drawdown
         else:
-            curve.append((d["time"], run))
-        days[_day(d["time"])]["net"] += d.get("net") or 0
+            curve.append((t, run))
+        days[_day(t)]["net"] += v
+    for c in in_cash:
+        if CASH_CLASS.get(c.get("type")) == "tax":
+            days[_day(c["time"])]["tax"] += c.get("amount") or 0
     positions = closed_positions(deals, start, end)
     for p in positions:
         days[_day(p["closed"])]["trades"] += 1
@@ -101,27 +121,39 @@ def build(deals: list[dict], account: dict, start: float, end: float, now: float
     day_rows = []
     for k in sorted(days):
         bal += days[k]["net"]
-        day_rows.append({"day": k, "trades": days[k]["trades"], "net": days[k]["net"], "balance": bal,
+        day_rows.append({"day": k, "trades": days[k]["trades"], "net": days[k]["net"], "tax": days[k]["tax"], "balance": bal,
                          "pct": days[k]["net"] / (bal - days[k]["net"]) * 100 if bal - days[k]["net"] else None})
     sym: dict[str, dict] = defaultdict(lambda: {"trades": 0, "wins": 0, "net": 0.0})
     for p in positions:
-        s = sym[p["symbol"]]
-        s["trades"] += 1
-        s["wins"] += p["net"] > 0
-        s["net"] += p["net"]
-    net = end_bal - start_bal
+        s_ = sym[p["symbol"]]
+        s_["trades"] += 1
+        s_["wins"] += p["net"] > 0
+        s_["net"] += p["net"]
+    if known:
+        net = sum(v for _, v in perf)                  # result before tax
+        # Modified Dietz: money deposited or withdrawn during the period counts for the share of the period it was there
+        span = (end - start) or 1
+        denom = start_bal + sum((c.get("amount") or 0) * (end - c["time"]) / span for c in in_cash if CASH_CLASS.get(c.get("type")) == "flow")
+    else:
+        net, denom = end_bal - start_bal, start_bal
     first_deal = min((d.get("time") or now for d in deals), default=None)
     return {
         "version": VERSION, "account": account.get("label"), "currency": account.get("currency") or "",
         "server": account.get("server") or "", "company": account.get("company") or "",
         "start": start, "end": end, "start_balance": start_bal, "end_balance": end_bal, "net": net,
-        "net_pct": net / start_bal * 100 if start_bal else None,
+        "net_pct": net / denom * 100 if denom else None,
+        "cash_known": known, "cash": in_cash, "taxes": sums["tax"], "flows": sums["flow"], "cash_result": sums["result"],
+        "cash_other": sums["other"], "deposits": sum(c["amount"] for c in in_cash if CASH_CLASS.get(c.get("type")) == "flow" and c["amount"] > 0),
+        "withdrawals": sum(c["amount"] for c in in_cash if CASH_CLASS.get(c.get("type")) == "flow" and c["amount"] < 0),
+        "after_tax": net + sums["tax"] if known else None,
+        "after_tax_pct": (net + sums["tax"]) / denom * 100 if known and denom else None,
+        "dietz": known and bool(sums["flow"]),
         "positions": positions, "trades": len(positions),
         "win_rate": len(wins) / len(positions) * 100 if positions else None,
         "profit_factor": sum(wins) / -sum(losses) if losses else None,
         "avg_win": sum(wins) / len(wins) if wins else None, "avg_loss": sum(losses) / len(losses) if losses else None,
         "best": max((p["net"] for p in positions), default=None), "worst": min((p["net"] for p in positions), default=None),
-        "other": net - sum(p["net"] for p in positions),      # costs of positions still open, results of positions opened before
+        "other": net - sum(p["net"] for p in positions),      # costs of positions still open, results of positions opened before, fees
         "max_dd": dd, "max_dd_pct": dd_pct, "curve": curve, "days": day_rows,
         "best_day": max(day_rows, key=lambda r: r["net"], default=None), "worst_day": min(day_rows, key=lambda r: r["net"], default=None),
         "symbols": sorted(({"symbol": k, **v} for k, v in sym.items()), key=lambda r: -abs(r["net"])),
@@ -129,7 +161,8 @@ def build(deals: list[dict], account: dict, start: float, end: float, now: float
     }
 
 
-def balance_check(deals: list[dict], balance_now: float, recorded: dict[str, float], tolerance: float = 1.0) -> dict:
+def balance_check(deals: list[dict], balance_now: float, recorded: dict[str, float], tolerance: float = 1.0,
+                  cash: list[dict] | None = None) -> dict:
     """Reconstructed balance (now minus every deal since) against the day-start balances SessionDesk recorded itself.
     A recorded day start may sit at UTC midnight or at the broker's midnight (UTC+2/+3): the closest of the three
     counts. Differences mean balance changes that are not trades (deposits, payouts, fees, dividend adjustments) or
@@ -140,7 +173,8 @@ def balance_check(deals: list[dict], balance_now: float, recorded: dict[str, flo
         cands = []
         for h in (0, 2, 3):
             t = (base - dt.timedelta(hours=h)).timestamp()
-            cands.append(balance_now - sum(d.get("net") or 0 for d in deals if (d.get("time") or 0) >= t))
+            cands.append(balance_now - sum(d.get("net") or 0 for d in deals if (d.get("time") or 0) >= t)
+                         - sum(c.get("amount") or 0 for c in cash or [] if (c.get("time") or 0) >= t))
         recon = min(cands, key=lambda v: abs(v - rec))
         rows.append({"day": day, "recorded": rec, "reconstructed": recon, "diff": recon - rec})
     bad = [r for r in rows if abs(r["diff"]) > tolerance]
@@ -156,6 +190,9 @@ def data_block(r: dict) -> dict:
     sb = r["start_balance"] or 1.0
     head = {"version": r["version"], "units": "percent" if pct else "money", "account": r["account"], "currency": r["currency"],
             "server": r["server"], "from": _stamp(r["start"]), "to": _stamp(r["end"])}
+    if r.get("cash_known"):
+        head["cash"] = [[str(c.get("ticket") or ""), _stamp(c["time"]), c.get("type") or "",
+                         round((c.get("amount") or 0) / sb * 100, 4) if pct else _r2(c.get("amount") or 0)] for c in r["cash"]]
     if pct:
         return {**head, "return_pct": round((r["end_balance"] / sb - 1) * 100, 4),
                 "positions": [[p["position_id"], _stamp(p["opened"]) if p["opened"] else "", _stamp(p["closed"]), p["symbol"] or "",
@@ -174,6 +211,7 @@ def report_id(r: dict, fp: str) -> str:
 
 
 POS_HEADER = ["position_id", "opened_utc", "closed_utc", "symbol", "side", "volume", "net"]
+CASH_HEADER = ["booking_id", "time_utc", "type", "amount"]
 
 
 def to_csv(r: dict, rid: str, fp: str) -> str:
@@ -194,14 +232,20 @@ def to_csv(r: dict, rid: str, fp: str) -> str:
     w.writerow(["balance_check", f"{chk.get('matched', 0)} of {chk.get('days', 0)} recorded day starts agree"
                 + ((f"; largest difference {worst['diff'] / (r['start_balance'] or 1) * 100:+.3f} % of the start balance" if pct
                     else f"; largest difference {worst['diff']:+.2f}") + f" on {worst['day']}" if worst else "")])
-    for k in (("net_pct", "trades", "win_rate", "profit_factor", "max_dd_pct") if pct
-              else ("net", "net_pct", "trades", "win_rate", "profit_factor", "max_dd", "max_dd_pct")):
+    for k in (("net_pct", "after_tax_pct", "trades", "win_rate", "profit_factor", "max_dd_pct") if pct
+              else ("net", "net_pct", "taxes", "after_tax", "after_tax_pct", "deposits", "withdrawals", "trades", "win_rate",
+                    "profit_factor", "max_dd", "max_dd_pct")):
         v = r.get(k)
         w.writerow([k, "" if v is None else round(v, 4) if isinstance(v, float) else v])
     w.writerow([])
     w.writerow(POS_HEADER)
     for row in b["positions"]:
         w.writerow(row)
+    if "cash" in b:                                    # block 3: balance bookings that are not trades (tax, deposits, fees)
+        w.writerow([])
+        w.writerow(CASH_HEADER)
+        for row in b["cash"]:
+            w.writerow(row)
     return out.getvalue()
 
 
@@ -215,15 +259,21 @@ def verify_csv(text: str) -> dict:
     if cut is None or not rows or rows[0][:2] != ["field", "value"]:
         return {"ok": False, "error": "not a SessionDesk report CSV"}
     meta = {r[0]: r[1] for r in rows[1:cut] if len(r) >= 2}
-    table = [r for r in rows[cut + 1:] if r]
+    rest = rows[cut + 1:]
+    cut2 = next((i for i, r in enumerate(rest) if not any(r)), None)
+    table = [r for r in (rest[:cut2] if cut2 is not None else rest) if r]
+    cash_rows = [r for r in rest[cut2 + 1:] if r] if cut2 is not None else []
     if not table or table[0] != POS_HEADER:
         return {"ok": False, "error": "position table missing"}
+    if cash_rows and cash_rows[0] != CASH_HEADER:
+        return {"ok": False, "error": "booking table unreadable"}
     try:
         block = {"version": int(meta["version"]), "units": meta.get("units", "money"), "account": meta["account"], "currency": meta["currency"],
                  "server": meta["server"], "from": meta["from"], "to": meta["to"],
                  **({"return_pct": float(meta["return_pct"])} if meta.get("units") == "percent"
                     else {"start_balance": float(meta["start_balance"]), "end_balance": float(meta["end_balance"])}),
-                 "positions": [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]]}
+                 "positions": [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]],
+                 **({"cash": [[c[0], c[1], c[2], float(c[3])] for c in cash_rows[1:]]} if cash_rows else {})}
     except (KeyError, ValueError, IndexError) as e:
         return {"ok": False, "error": f"unreadable field: {e}"}
     got = fingerprint(block)
@@ -306,8 +356,14 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
                        "see 'Data, method and limits'.", 8.5, bold=True, color=down)
     y += 22
     col = lambda v: up if (v or 0) > 0 else down if (v or 0) < 0 else dark  # noqa: E731
+    known = r.get("cash_known")
+    ret_label = "Return (Modified Dietz)" if r.get("dietz") else "Return on start balance"
     kpis = [
-        ("Net result", M(r["net"], unit=True), col(r["net"])), ("Return on start balance", _pct(r["net_pct"]), col(r["net_pct"])),
+        ("Net result before tax" if known else "Net result", M(r["net"], unit=True), col(r["net"])),
+        (ret_label + (" before tax" if known else ""), _pct(r["net_pct"]), col(r["net_pct"])),
+        *([("Taxes withheld (-) / refunded (+)", M(r["taxes"], unit=True), col(r["taxes"])),
+           ("Return after tax", _pct(r["after_tax_pct"]), col(r["after_tax_pct"]))] if known else []),
+        *([("Deposits / withdrawals", f"{M(r['deposits'])} / {M(r['withdrawals'])}", dark)] if known and (r["deposits"] or r["withdrawals"]) else []),
         *([("Trading days", str(len(r["days"])), dark), ("Positions per trading day", f"{r['trades'] / len(r['days']):.1f}" if r["days"] else "-", dark)]
           if pct else [("Start balance", B(r["start_balance"]) + f" {cur}", dark), ("End balance", B(r["end_balance"]) + f" {cur}", dark)]),
         ("Closed positions", str(r["trades"]), dark), ("Win rate", _pct(r["win_rate"], False), dark),
@@ -325,7 +381,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         pdf.rect(x, yy, bw, bh, fill=(0.965, 0.97, 0.975))
         pdf.text(x + 8, yy + 13, k, 7.5, color=grey)
         pdf.text(x + 8, yy + 27, v, 11, bold=True, color=c)
-    y += 6 * (bh + 6) + 16
+    y += (len(kpis) + 1) // 2 * (bh + 6) + 16
     y = heading(y, "Return since the start of the period, after each deal" if pct else "Balance after each deal")
     pts = [(t, (v / sb - 1) * 100) for t, v in r["curve"]] if pct else r["curve"]
     ch_h = 170.0
@@ -369,6 +425,24 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
               [[(s["symbol"] or "-", None), (str(s["trades"]), None), (_pct(s["wins"] / s["trades"] * 100, False), None),
                 (M(s["net"]), col(s["net"]))] for s in r["symbols"]])
 
+    # ---- taxes and the other balance bookings
+    if known:
+        y = heading(y + 6, "Taxes and other balance bookings")
+        totals = [("Taxes withheld", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] < 0)),
+                  ("Tax refunds", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] > 0)),
+                  ("Net tax", r["taxes"]), ("Fees, interest, dividend adjustments (counted in the result)", r["cash_result"]),
+                  ("Deposits", r["deposits"]), ("Withdrawals", r["withdrawals"]), ("Corrections (not counted)", r["cash_other"])]
+        y = table(y, [("", L, "left"), ("Net, % of start" if pct else f"Amount {cur}", R, "right")],
+                  [[(k, None), (M(v), col(v))] for k, v in totals])
+        if r["cash"]:
+            y = table(y, [("Booking (broker)", L, "left"), ("Time UTC", L + 110, "left"), ("Type", L + 210, "left"),
+                          ("Comment", L + 290, "left"), ("% of start" if pct else "Amount", R, "right")],
+                      [[(str(c.get("ticket") or ""), None), (_stamp(c["time"]), None), (c.get("type") or "", None),
+                        ((c.get("comment") or "")[:40], None), (M(c.get("amount") or 0), col(c.get("amount")))] for c in r["cash"]])
+        else:
+            pdf.text(L, y, "No tax, deposit, fee or other booking in this period.", 8, color=grey)
+            y += 14
+
     # ---- every position
     y = heading(new_page(), f"Closed positions ({r['trades']})")
     y = table(y, [("Position ID (broker)", L, "left"), ("Opened UTC", L + 110, "left"), ("Closed UTC", L + 200, "left"),
@@ -384,8 +458,13 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     y = heading(y + 4, "Data, method and limits")
     notes = [
         "Source: the deal history of the MetaTrader 5 terminal, exported read-only by SessionDesk; no figure was typed in by hand.",
-        "Start balance = balance at report time minus every deal result since the start of the period. The export carries no",
-        "deposits, withdrawals or payouts: one inside the period would make the start balance and the return wrong.",
+        *(["Start balance = balance at report time minus every deal and every balance booking since the start (exact).",
+           "Result before tax = closed trades plus fees, interest and dividend adjustments. Taxes, deposits and withdrawals are",
+           "shown apart and never counted as result" + ("; with money moved in or out the return is time-weighted (Modified Dietz)." if r.get("dietz") else ".")]
+          if known else
+          ["Start balance = balance at report time minus every deal result since the start of the period. This export carries no",
+           "balance bookings (taxes, deposits, payouts, fees): any inside the period makes start balance and return wrong.",
+           "SessionDeskBridge exports them from version 1.2 on."]),
         "A position counts in the period in which it was closed; its result includes the costs of all its deals (commission, swap).",
         "Positions still open at the end of the period are not included. Times and day boundaries are UTC.",
         "Shown in percent: every figure is a share of the start balance; no amounts, no balances, no lot sizes." if pct else "",
@@ -457,7 +536,9 @@ async def _account_data(ctx, account: str, full_number: bool):
             masked = ("…" + str(label)[-3:]) if label and len(str(label)) > 3 else label
             if account in (label, masked):
                 deals = await c.deals(**kw) if hasattr(c, "deals") else []
-                return {**a, "label": label}, [d for d in deals if d.get("account") == label]
+                book = await c.cash(**kw) if hasattr(c, "cash") else {"rows": [], "covered": []}
+                cash = [x for x in book["rows"] if x.get("account") == label] if label in book["covered"] else None
+                return {**a, "label": label, "cash": cash}, [d for d in deals if d.get("account") == label]
     return None, []
 
 
@@ -498,7 +579,7 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
     if not deals:
         return {"error": "no deals exported for this account"}
     start, end = period_bounds(kind, dt.date.today(), frm, to)
-    end = min(end, time.time())
+    end = min(end, time.time() // 60 * 60)               # whole minutes: the report states its end to the minute
     first = min(d["time"] for d in deals if d.get("time"))
     trimmed = None
     if first > start:                                   # the export does not reach back far enough
@@ -508,11 +589,11 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
             return {"error": f"the deal export of this account starts on {_day(first)} - too late for this period"}
         trimmed, start = _day(start), new_start
     r = build(deals, {"label": acc["label"], "currency": acc.get("currency"), "balance": acc.get("balance"), "server": acc.get("server"),
-                      "company": acc.get("company")}, start, end)
+                      "company": acc.get("company")}, start, end, cash=acc.get("cash"))
     stored = await ctx.db.run(ctx.db.day_starts)
     tail = str(acc["label"])[-3:]
     recorded = {day: b for (a, day), b in stored.items() if str(a)[-3:] == tail and str(a)[:-3] in ("…", "", str(acc["label"])[:-3])}
-    r["check"] = balance_check(deals, acc.get("balance") or 0.0, recorded)
+    r["check"] = balance_check(deals, acc.get("balance") or 0.0, recorded, cash=acc.get("cash"))
     r["units"] = "percent" if units == "percent" else "money"
     fp = fingerprint(data_block(r))
     rid = report_id(r, fp)
@@ -530,6 +611,99 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
     return {**row, "trimmed_from": trimmed, "check": {k: v for k, v in r["check"].items() if k != "rows"},
             "summary": {k: r[k] for k in (("net_pct", "trades", "win_rate", "profit_factor", "max_dd_pct") if r["units"] == "percent"
                                           else ("start_balance", "end_balance", "net", "net_pct", "trades", "win_rate", "profit_factor", "max_dd", "max_dd_pct"))}}
+
+
+def compare_blocks(old: dict, new: dict) -> list[str]:
+    """Differences between an issued report's data and the same report built again (pure, tested)."""
+    out = []
+    for k in ("account", "currency", "from", "to", "start_balance", "end_balance", "return_pct"):
+        if old.get(k) != new.get(k):
+            out.append(f"{k}: report {old.get(k)} - rebuilt {new.get(k)}")
+    po, pn = {p[0]: p for p in old.get("positions", [])}, {p[0]: p for p in new.get("positions", [])}
+    missing, extra = sorted(set(po) - set(pn)), sorted(set(pn) - set(po))
+    changed = [k for k in po.keys() & pn.keys() if po[k] != pn[k]]
+    if missing:
+        out.append(f"{len(missing)} position(s) in the report but not in the broker export: {', '.join(missing[:5])}")
+    if extra:
+        out.append(f"{len(extra)} position(s) in the broker export but not in the report: {', '.join(extra[:5])}")
+    if changed:
+        out.append(f"{len(changed)} position(s) with other values: {', '.join(sorted(changed)[:5])}")
+    if old.get("cash") != new.get("cash"):
+        out.append("balance bookings differ")
+    return out
+
+
+def explain(old: dict, new: dict) -> str | None:
+    """The one benign cause of a difference: a balance booking after the report that the export does not carry (tax,
+    fee, payout). Then every trade is the same and only the reconstructed start balance moved - in money both balances
+    move by the same amount, in percent every figure scales by the same factor (pure, tested)."""
+    po, pn = {p[0]: p for p in old.get("positions", [])}, {p[0]: p for p in new.get("positions", [])}
+    if set(po) != set(pn) or not po:
+        return None
+    if all(po[k][:6] == pn[k][:6] for k in po) and "start_balance" in old:
+        d1, d2 = new["start_balance"] - old["start_balance"], new["end_balance"] - old["end_balance"]
+        if [x[6] for x in po.values()] == [x[6] for x in pn.values()] and abs(d1 - d2) < 0.011 and abs(d1) >= 0.01:
+            return (f"Every position is identical; start and end balance both moved by {d1:+,.2f}: a balance booking after the "
+                    "report (tax, fee, payout) that this export does not carry. The trades in the report are correct.")
+    if "return_pct" in old and all(po[k][:6] == pn[k][:6] for k in po):
+        ratios = [pn[k][6] / po[k][6] for k in po if abs(po[k][6]) >= 0.05]      # small values are too rounded to compare
+        if ratios and max(ratios) - min(ratios) < 0.01 and abs(ratios[0] - 1) > 1e-4:
+            return (f"Every position is identical; all percentages scale by the same factor ({ratios[0]:.4f}), so only the "
+                    "reconstructed start balance moved: a balance booking after the report (tax, fee, payout) that this export "
+                    "does not carry. The trades in the report are correct.")
+    return None
+
+
+async def recheck(ctx, rid: str) -> dict:
+    """Build an issued report again from the broker export as it is now - same account, same minutes, same units -
+    and compare it with what the report states. Identical = the report was made correctly from the broker's data."""
+    path = ctx.data_dir / "reports" / f"{rid}.csv"
+    if not path.is_file():
+        return {"error": f"no CSV of {rid} in this SessionDesk"}
+    text = path.read_text(encoding="utf-8")
+    v = verify_csv(text)
+    if not v.get("ok"):
+        return {"error": "the stored CSV does not match its own fingerprint - it was changed", "detail": v}
+    rows = list(csv.reader(io.StringIO(text)))
+    meta = {r[0]: r[1] for r in rows[1:rows.index([])] if len(r) >= 2}
+    full = not str(meta["account"]).startswith("…")
+    acc, deals = await _account_data(ctx, meta["account"], full)
+    if not acc:
+        return {"error": f"account {meta['account']} is not connected now"}
+    start = dt.datetime.strptime(meta["from"], "%Y-%m-%d %H:%M").replace(tzinfo=UTC).timestamp()
+    end = dt.datetime.strptime(meta["to"], "%Y-%m-%d %H:%M").replace(tzinfo=UTC).timestamp()
+    first = min((d["time"] for d in deals if d.get("time")), default=None)
+    if first is None or first > start:
+        return {"report_id": rid, "reproducible": False,
+                "detail": f"the broker export now starts {_day(first) if first else 'nowhere'} - after the report's start, so it cannot be rebuilt"}
+    old = _block_from_csv(text)
+    if "cash" in old and acc.get("cash") is None:
+        return {"report_id": rid, "reproducible": False, "detail": "the report counted balance bookings; the export now carries none"}
+    r = build(deals, {"label": acc["label"], "currency": acc.get("currency"), "balance": acc.get("balance"), "server": acc.get("server"),
+                      "company": acc.get("company")}, start, end, cash=acc.get("cash") if "cash" in old else None)
+    r["units"] = meta.get("units", "money")
+    new = data_block(r)
+    diffs = compare_blocks(old, new)
+    return {"report_id": rid, "reproducible": True, "identical": not diffs, "differences": diffs, "explained": explain(old, new),
+            "checked": f"{len(new.get('positions', []))} positions, {len(new.get('cash', []))} bookings"}
+
+
+def _block_from_csv(text: str) -> dict:
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    cut = rows.index([])
+    meta = {r[0]: r[1] for r in rows[1:cut] if len(r) >= 2}
+    rest = rows[cut + 1:]
+    cut2 = next((i for i, r in enumerate(rest) if not any(r)), None)
+    table = [r for r in (rest[:cut2] if cut2 is not None else rest) if r]
+    cash_rows = [r for r in rest[cut2 + 1:] if r] if cut2 is not None else []
+    out = {k: meta.get(k) for k in ("account", "currency", "from", "to")}
+    for k in ("start_balance", "end_balance", "return_pct"):
+        if meta.get(k) not in (None, ""):
+            out[k] = float(meta[k])
+    out["positions"] = [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]]
+    if cash_rows:
+        out["cash"] = [[c[0], c[1], c[2], float(c[3])] for c in cash_rows[1:]]
+    return out
 
 
 async def verify(ctx, data: bytes) -> dict:

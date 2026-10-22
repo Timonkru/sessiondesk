@@ -23,7 +23,7 @@ TSV, first line `#sessiondesk  version  kind  utc_epoch  server_offset  login`.
 | `positions_<login>.tsv` | open positions, money at risk to the stop, magic number | 2 s |
 | `quotes_<login>.tsv` | Market Watch bid/ask and previous daily close | 2 s |
 | `eas_<login>.tsv` | which Expert Advisor runs on which chart | 60 s |
-| `deals_<login>.tsv` | closed deals of the last 30 days | 60 s |
+| `deals_<login>.tsv` | deals of the last 100 days (`InpDealDays`): trades, and from bridge 1.20 on the balance bookings a statement shows - deposits and withdrawals, tax withheld or refunded, charges, commissions billed apart, interest, dividend adjustments (type column; `fee` column) | 60 s |
 | `calendar.tsv` | MetaQuotes calendar incl. actual values, 12 h back to 7 days ahead | on change (checked every 2 s) and every 60 s |
 
 Times are converted from trade-server time to UTC (offset rounded to 15 minutes). Files older than

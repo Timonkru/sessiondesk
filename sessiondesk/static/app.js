@@ -9,6 +9,7 @@ const VIEWS = {
   markets: () => import("./views/overview.js"),
   journal: () => import("./views/journal.js"),
   reports: () => import("./views/reports.js"),
+  taxes: () => import("./views/taxes.js"),
   stock: () => import("./views/stock.js"),
   watch: () => import("./views/watch.js"),
   levels: () => import("./views/levels.js"),

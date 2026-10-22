@@ -12,9 +12,20 @@ export async function render(root, _params, ctx) {
   const links = (r) => h("span", null, h("a", { href: file(r.id, "pdf") + "&view=1", target: "_blank", rel: "noopener" }, "view"), " · ",
     h("a", { href: file(r.id, "pdf"), download: `${r.id}.pdf` }, "PDF"), " · ",
     h("a", { href: file(r.id, "csv"), download: `${r.id}.csv` }, "CSV"));
-  const form = h("div", null, loading()), result = h("div"), issued = h("div"), check = h("div");
+  const form = h("div", null, loading()), result = h("div"), issued = h("div"), check = h("div"), recheckBox = h("div");
+  // build an issued report again from the broker export as it is now and compare: identical = made correctly
+  const recheckNote = (v) => (v.error ? note(v.error, "warn")
+    : !v.reproducible ? note(`${v.report_id}: cannot be rebuilt - ${v.detail}`, "warn")
+    : v.identical ? note(`${v.report_id}: rebuilt from the broker export now - identical (${v.checked}). The report was made correctly from the broker's data.`, "up")
+    : v.explained ? h("div", null, note(`${v.report_id}: rebuilt from the broker export now - ${v.explained}`, "up"),
+      h("details", null, h("summary", { class: "small muted" }, "the differences"), h("ul", { class: "small" }, v.differences.map((x) => h("li", null, x)))))
+    : h("div", null, note(`${v.report_id}: rebuilt from the broker export now - it differs:`, "warn"), h("ul", { class: "small" }, v.differences.map((x) => h("li", null, x)))));
+  const recheck = async (id, box) => {
+    clear(box, loading("Rebuilding from the broker export…"));
+    clear(box, recheckNote(await api(`/api/reports/${encodeURIComponent(id)}/recheck`, { method: "POST", body: {} })));
+  };
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Reports"), h("span", { class: "meta" }, "performance of an account over a period - a PDF to show, a CSV to check")),
-    section("New report", form, result), section("Check a report someone shows you", check), section("Issued reports", issued));
+    section("New report", form, result), section("Check a report someone shows you", check), section("Issued reports", recheckBox, issued));
 
   const load = async () => {
     const d = await api("/api/reports", { fresh: true });
@@ -64,6 +75,7 @@ export async function render(root, _params, ctx) {
     { label: "Net", num: true, cls: (r) => dir(r.net_pct), render: (r) => (r.units === "percent" || r.net == null ? h("span", { class: "muted small" }, "% only") : `${num(r.net, 2)} ${r.currency || ""}`) },
     { label: "%", num: true, cls: (r) => dir(r.net_pct), render: (r) => pct(r.net_pct, 2) },
     { label: "Positions", num: true, render: (r) => r.trades }, { label: "", render: links },
+    { label: "", render: (r) => h("button", { class: "linkish", title: "Build this report again from the broker export and compare", onclick: () => recheck(r.id, recheckBox) }, "recheck") },
   ], rows, { empty: "No report issued yet." }));
 
   // a PDF or CSV checked against the register; a CSV also gets its fingerprint recomputed
@@ -85,7 +97,9 @@ export async function render(root, _params, ctx) {
         ? note(`Fingerprint recomputed from the CSV matches the one it states (${v.csv.recomputed.slice(0, 16)}…): no number of the report data was changed.`, "up")
         : note(`Fingerprint does NOT match: the CSV states ${String(v.csv.stated).slice(0, 16)}…, its data gives ${v.csv.recomputed.slice(0, 16)}… - a figure was changed.`, "warn"));
     }
-    clear(verdict, lines, h("p", { class: "small muted" }, `SHA-256 of the file: ${v.sha256}`));
+    const again = h("div");
+    clear(verdict, lines, again, h("p", { class: "small muted" }, `SHA-256 of the file: ${v.sha256}`));
+    if (reg) recheck(reg.id, again);                 // a registered report is also rebuilt from the broker data
   });
   clear(check, h("div", { class: "toolbar" }, pick), verdict);
   await load();
