@@ -152,6 +152,20 @@ def deal_net(r: dict) -> float:
     return sum(num(r.get(k)) or 0 for k in ("profit", "commission", "swap", "fee"))
 
 
+# Brokers that book everything as BALANCE tell the kind apart only in the comment. Pepperstone GmbH (Germany):
+# "DP ..." deposit, "WD ..." withdrawal, "WHT #..." tax withheld per trade, "Tax settlement #..." tax refunded or charged
+# when losses are offset, "Dividend <index> #..." index-CFD dividend adjustment.
+BALANCE_COMMENT_TYPES = (("wht", "TAX"), ("tax", "TAX"), ("withholding", "TAX"), ("dividend", "DIVIDEND"))
+
+
+def booking_type(kind: str | None, comment: str | None) -> str:
+    """Exported deal type, refined by the comment for BALANCE bookings (pure, tested)."""
+    if kind != "BALANCE":
+        return kind or ""
+    c = (comment or "").strip().lower()
+    return next((t for prefix, t in BALANCE_COMMENT_TYPES if c.startswith(prefix)), "BALANCE")
+
+
 def legacy_deals(data: dict, login: str) -> list[dict]:
     out = []
     for f in data["rows"]:
@@ -367,7 +381,7 @@ class MT5Bridge(Connector):
                 if r.get("type") in ("BUY", "SELL"):
                     continue
                 rows.append({"account": mask(f["login"], hide), "ticket": r.get("ticket"), "time": num(r.get("time_utc")),
-                             "type": r.get("type"), "amount": deal_net(r), "comment": r.get("comment") or ""})
+                             "type": booking_type(r.get("type"), r.get("comment")), "amount": deal_net(r), "comment": r.get("comment") or ""})
         return {"rows": rows, "covered": covered}
 
     async def calendar(self, start: float | None = None, end: float | None = None) -> list[dict]:

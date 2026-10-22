@@ -174,3 +174,45 @@ def test_recheck_explains_a_moved_start_balance():
     pct_new = {"return_pct": 6.1, "positions": [["1", "a", "b", "X", "long", "", 10.1], ["2", "a", "b", "X", "short", "", -4.04]]}
     assert "same factor" in report.explain(pct_old, pct_new)
     assert report.explain(pct_old, {**pct_new, "positions": [["1", "a", "b", "X", "long", "", 10.1], ["2", "a", "b", "X", "short", "", -5.0]]}) is None
+
+
+def test_balance_comment_decides_the_booking_type():
+    from sessiondesk.connectors.mt5 import booking_type
+    assert booking_type("BALANCE", "WHT #10000001:20000001") == "TAX"                 # Pepperstone GmbH: tax per trade
+    assert booking_type("BALANCE", "Tax settlement #A0000000000001") == "TAX"         # refund when losses are offset
+    assert booking_type("BALANCE", "Dividend US500 #30000001") == "DIVIDEND"
+    assert booking_type("BALANCE", "DP card01 #P0000000000001") == "BALANCE"         # deposit
+    assert booking_type("BALANCE", "WD CC_01 :WTH0000000000001") == "BALANCE"         # withdrawal
+    assert booking_type("CHARGE", "WHT looks like tax") == "CHARGE"                   # only BALANCE is refined
+    assert booking_type("BALANCE", None) == "BALANCE"
+
+
+def test_day_balance_and_account_curve_end_at_the_real_balance():
+    r = report.build(_deals(), {"label": "123456", "currency": "EUR", "balance": 15_000.0}, T0, T0 + 3 * DAY, now=T0 + 3 * DAY, cash=_cash())
+    assert abs(r["days"][-1]["balance"] - 15_000.0) < 1e-9 and abs(r["balance_curve"][-1][1] - 15_000.0) < 1e-9
+    assert r["curve"][-1][1] == r["start_balance"] + r["net"]                         # performance path unchanged
+    assert abs(r["days"][-1]["perf_balance"] - r["curve"][-1][1]) < 1e-9
+    assert round(sum(d["bookings"] for d in r["days"]), 2) == round(-78.07 + 132.40 + 5000, 2)   # the fee is result, not a booking
+
+
+def test_performance_report_sums_taxes_tax_report_itemises():
+    r = report.build(_deals(), {"label": "123456", "currency": "EUR", "balance": 15_000.0}, T0, T0 + 3 * DAY, now=T0 + 3 * DAY, cash=_cash())
+    texts = {}
+    for mode in ("summed", "itemised"):
+        r["tax_detail"] = mode
+        b = report.data_block(r)
+        assert b["tax_detail"] == mode
+        fp = report.fingerprint(b)
+        csv_text = report.to_csv(r, report.report_id(r, fp), fp)
+        assert report.verify_csv(csv_text)["ok"]
+        raw = report.to_pdf(r, "SD-X", fp)
+        texts[mode] = (csv_text, "".join(p.extract_text() for p in pypdf.PdfReader(io.BytesIO(raw)).pages))
+    s_csv, s_pdf = texts["summed"]
+    i_csv, i_pdf = texts["itemised"]
+    assert ",TAX," not in s_csv and "tax_net,54.33" in s_csv and ",BALANCE,5000.0" in s_csv
+    assert ",TAX,-78.07" in i_csv and "tax_net" not in i_csv
+    assert not report.verify_csv(s_csv.replace("tax_net,54.33", "tax_net,5.43"))["ok"]       # a changed tax sum shows
+    assert "Trading performance report" in s_pdf and "Taxes, net (itemised in the tax report)" in s_pdf
+    assert "Return after tax" not in s_pdf and "tax refund" not in s_pdf
+    assert "Trading performance and tax report" in i_pdf and "Taxes per month" in i_pdf and "tax refund" in i_pdf
+    assert "15,000.00" in s_pdf                                                             # day table ends at the real balance

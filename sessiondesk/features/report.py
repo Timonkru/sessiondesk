@@ -12,9 +12,13 @@ What such a report can prove, and what not:
   position IDs in the report are the broker's) or read-only access for the reader (investor password, a verified
   track record on Myfxbook or FX Blue, the prop firm's own metrics).
 
-Balances: the export has no deposits or withdrawals, so the start balance is reconstructed as the balance now minus
-every deal result since the start. A payout or deposit inside the period would make that wrong - the report says so.
-Day boundaries are UTC.
+Balances: the start balance is the balance now minus every deal and every balance booking since the start (bridge
+1.20+; older exports carry no bookings, then a payout or deposit inside the period makes it wrong - the report says
+so). Two paths: the performance path (start balance + result before tax) gives the drawdown, the account balance
+(every deal, tax, deposit and withdrawal) ends at the real balance. Day boundaries are UTC.
+
+Two kinds (tax_detail): "summed" = performance report, taxes as one net figure; "itemised" = tax report, every tax
+booking listed plus taxes per month and per day. Reports made before this choice existed behave as "itemised".
 """
 from __future__ import annotations
 
@@ -99,7 +103,7 @@ def build(deals: list[dict], account: dict, start: float, end: float, now: float
     # the performance path: trades and result bookings only - taxes, deposits and withdrawals do not move it
     perf = sorted([(d["time"], d.get("net") or 0) for d in deals if start <= (d.get("time") or 0) < end]
                   + [(c["time"], c.get("amount") or 0) for c in in_cash if CASH_CLASS.get(c.get("type")) == "result"])
-    curve, days = [(start, start_bal)], defaultdict(lambda: {"net": 0.0, "trades": 0, "tax": 0.0})
+    curve, days = [(start, start_bal)], defaultdict(lambda: {"net": 0.0, "trades": 0, "tax": 0.0, "bookings": 0.0})
     run = start_bal
     for t, v in perf:
         run += v
@@ -109,20 +113,36 @@ def build(deals: list[dict], account: dict, start: float, end: float, now: float
             curve.append((t, run))
         days[_day(t)]["net"] += v
     for c in in_cash:
-        if CASH_CLASS.get(c.get("type")) == "tax":
+        cls = CASH_CLASS.get(c.get("type"), "other")
+        if cls == "tax":
             days[_day(c["time"])]["tax"] += c.get("amount") or 0
+        if cls != "result":                            # taxes, deposits, withdrawals, corrections: move the balance, not the result
+            days[_day(c["time"])]["bookings"] += c.get("amount") or 0
+    # the account balance: every deal and every booking - ends at the real balance
+    bal_curve = [(start, start_bal)]
+    run_b = start_bal
+    for t, v in sorted([(d["time"], d.get("net") or 0) for d in deals if start <= (d.get("time") or 0) < end]
+                       + [(c["time"], c.get("amount") or 0) for c in in_cash]):
+        run_b += v
+        if bal_curve[-1][0] == t and len(bal_curve) > 1:
+            bal_curve[-1] = (t, run_b)
+        else:
+            bal_curve.append((t, run_b))
     positions = closed_positions(deals, start, end)
     for p in positions:
         days[_day(p["closed"])]["trades"] += 1
     wins = [p["net"] for p in positions if p["net"] > 0]
     losses = [p["net"] for p in positions if p["net"] < 0]
     dd, dd_pct = max_drawdown([v for _, v in curve])
-    bal = start_bal
+    bal = perf_bal = start_bal
     day_rows = []
     for k in sorted(days):
-        bal += days[k]["net"]
-        day_rows.append({"day": k, "trades": days[k]["trades"], "net": days[k]["net"], "tax": days[k]["tax"], "balance": bal,
-                         "pct": days[k]["net"] / (bal - days[k]["net"]) * 100 if bal - days[k]["net"] else None})
+        before = bal
+        perf_bal += days[k]["net"]
+        bal += days[k]["net"] + days[k]["bookings"]
+        day_rows.append({"day": k, "trades": days[k]["trades"], "net": days[k]["net"], "tax": days[k]["tax"],
+                         "bookings": days[k]["bookings"], "balance": bal, "perf_balance": perf_bal,
+                         "pct": days[k]["net"] / before * 100 if before else None})
     sym: dict[str, dict] = defaultdict(lambda: {"trades": 0, "wins": 0, "net": 0.0})
     for p in positions:
         s_ = sym[p["symbol"]]
@@ -154,7 +174,7 @@ def build(deals: list[dict], account: dict, start: float, end: float, now: float
         "avg_win": sum(wins) / len(wins) if wins else None, "avg_loss": sum(losses) / len(losses) if losses else None,
         "best": max((p["net"] for p in positions), default=None), "worst": min((p["net"] for p in positions), default=None),
         "other": net - sum(p["net"] for p in positions),      # costs of positions still open, results of positions opened before, fees
-        "max_dd": dd, "max_dd_pct": dd_pct, "curve": curve, "days": day_rows,
+        "max_dd": dd, "max_dd_pct": dd_pct, "curve": curve, "balance_curve": bal_curve, "days": day_rows,
         "best_day": max(day_rows, key=lambda r: r["net"], default=None), "worst_day": min(day_rows, key=lambda r: r["net"], default=None),
         "symbols": sorted(({"symbol": k, **v} for k, v in sym.items()), key=lambda r: -abs(r["net"])),
         "first_deal": first_deal, "generated": now,
@@ -190,9 +210,15 @@ def data_block(r: dict) -> dict:
     sb = r["start_balance"] or 1.0
     head = {"version": r["version"], "units": "percent" if pct else "money", "account": r["account"], "currency": r["currency"],
             "server": r["server"], "from": _stamp(r["start"]), "to": _stamp(r["end"])}
+    mode = r.get("tax_detail")
+    if mode:
+        head["tax_detail"] = mode
     if r.get("cash_known"):
+        rows = [c for c in r["cash"] if mode != "summed" or CASH_CLASS.get(c.get("type")) != "tax"]
         head["cash"] = [[str(c.get("ticket") or ""), _stamp(c["time"]), c.get("type") or "",
-                         round((c.get("amount") or 0) / sb * 100, 4) if pct else _r2(c.get("amount") or 0)] for c in r["cash"]]
+                         round((c.get("amount") or 0) / sb * 100, 4) if pct else _r2(c.get("amount") or 0)] for c in rows]
+        if mode == "summed":
+            head["tax_net"] = round(r["taxes"] / sb * 100, 4) if pct else _r2(r["taxes"])
     if pct:
         return {**head, "return_pct": round((r["end_balance"] / sb - 1) * 100, 4),
                 "positions": [[p["position_id"], _stamp(p["opened"]) if p["opened"] else "", _stamp(p["closed"]), p["symbol"] or "",
@@ -220,7 +246,8 @@ def to_csv(r: dict, rid: str, fp: str) -> str:
     out = io.StringIO()
     w = csv.writer(out, lineterminator="\n")
     w.writerow(["field", "value"])
-    for k in ("version", "units", "account", "currency", "server", "from", "to", "start_balance", "end_balance", "return_pct"):
+    for k in ("version", "units", "tax_detail", "account", "currency", "server", "from", "to", "start_balance", "end_balance",
+              "return_pct", "tax_net"):
         if k in b:
             w.writerow([k, b[k]])
     w.writerow(["sha256", fp])
@@ -273,7 +300,9 @@ def verify_csv(text: str) -> dict:
                  **({"return_pct": float(meta["return_pct"])} if meta.get("units") == "percent"
                     else {"start_balance": float(meta["start_balance"]), "end_balance": float(meta["end_balance"])}),
                  "positions": [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]],
-                 **({"cash": [[c[0], c[1], c[2], float(c[3])] for c in cash_rows[1:]]} if cash_rows else {})}
+                 **({"cash": [[c[0], c[1], c[2], float(c[3])] for c in cash_rows[1:]]} if cash_rows else {}),
+                 **({"tax_detail": meta["tax_detail"]} if "tax_detail" in meta else {}),
+                 **({"tax_net": float(meta["tax_net"])} if "tax_net" in meta else {})}
     except (KeyError, ValueError, IndexError) as e:
         return {"ok": False, "error": f"unreadable field: {e}"}
     got = fingerprint(block)
@@ -296,7 +325,9 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
     from ..pdfwriter import A4, PDF
     cur = r["currency"]
     period = f"{_day(r['start'])} to {_day(r['end'] - 1)} (UTC)"
-    pdf = PDF(title=f"Trading performance report {rid}", author="SessionDesk", subject=f"Account {r['account']}, {period}")
+    itemised = r.get("tax_detail") != "summed"
+    title = "Trading performance and tax report" if itemised and r.get("cash_known") else "Trading performance report"
+    pdf = PDF(title=f"{title} {rid}", author="SessionDesk", subject=f"Account {r['account']}, {period}")
     L, R, TOP = 42.0, A4[0] - 42.0, 52.0
     grey, dark, blue = (0.45, 0.45, 0.45), (0.1, 0.1, 0.1), (0.12, 0.36, 0.7)
     up, down = (0.09, 0.5, 0.27), (0.75, 0.17, 0.15)
@@ -341,7 +372,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
 
     # ---- page 1: title, key figures, balance curve
     y = new_page()
-    pdf.text(L, y, "Trading performance report", 18, bold=True, color=dark)
+    pdf.text(L, y, title, 18, bold=True, color=dark)
     pdf.text(R, y, rid, 9, bold=True, color=blue, align="right")
     y += 18
     pdf.text(L, y, f"Account {r['account']}" + (f"  ·  {r['server']}" if r["server"] else "") + (f"  ·  {r['company']}" if r["company"] else "")
@@ -362,7 +393,7 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         ("Net result before tax" if known else "Net result", M(r["net"], unit=True), col(r["net"])),
         (ret_label + (" before tax" if known else ""), _pct(r["net_pct"]), col(r["net_pct"])),
         *([("Taxes withheld (-) / refunded (+)", M(r["taxes"], unit=True), col(r["taxes"])),
-           ("Return after tax", _pct(r["after_tax_pct"]), col(r["after_tax_pct"]))] if known else []),
+           ("Return after tax", _pct(r["after_tax_pct"]), col(r["after_tax_pct"]))] if known and itemised else []),
         *([("Deposits / withdrawals", f"{M(r['deposits'])} / {M(r['withdrawals'])}", dark)] if known and (r["deposits"] or r["withdrawals"]) else []),
         *([("Trading days", str(len(r["days"])), dark), ("Positions per trading day", f"{r['trades'] / len(r['days']):.1f}" if r["days"] else "-", dark)]
           if pct else [("Start balance", B(r["start_balance"]) + f" {cur}", dark), ("End balance", B(r["end_balance"]) + f" {cur}", dark)]),
@@ -382,11 +413,14 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         pdf.text(x + 8, yy + 13, k, 7.5, color=grey)
         pdf.text(x + 8, yy + 27, v, 11, bold=True, color=c)
     y += (len(kpis) + 1) // 2 * (bh + 6) + 16
-    y = heading(y, "Return since the start of the period, after each deal" if pct else "Balance after each deal")
+    acct = [] if pct or not known else r.get("balance_curve") or []      # the real balance, only when bookings are known
+    acct = acct if any(abs(a - b) >= 0.005 for (_, a), (_, b) in zip(acct[-1:], r["curve"][-1:])) else []
+    y = heading(y, "Return since the start of the period, after each deal" if pct else
+                "Start balance + result (colour) and account balance (grey), after each deal" if acct else "Balance after each deal")
     pts = [(t, (v / sb - 1) * 100) for t, v in r["curve"]] if pct else r["curve"]
     ch_h = 170.0
     pdf.rect(L, y, R - L, ch_h, stroke=(0.85, 0.85, 0.85))
-    vals = [v for _, v in pts]
+    vals = [v for _, v in pts] + [v for _, v in acct]
     lo, hi = min(vals), max(vals)
     pad = (hi - lo) * 0.08 or max(abs(hi) * 0.01, 1)
     lo, hi = lo - pad, hi + pad
@@ -399,16 +433,25 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         pdf.text(L + 46, Y(v) + 3, f"{v:+.1f} %" if pct else f"{v:,.0f}", 7, color=grey, align="right")
     base = 0.0 if pct else r["start_balance"]
     pdf.line(L + 50, Y(base), R - 10, Y(base), 0.5, (0.6, 0.6, 0.6))
-    steps = []
-    for i, (t, v) in enumerate(pts):                     # a balance moves in steps: hold each level until the next deal
-        if i:
-            steps.append((X(t), Y(pts[i - 1][1])))
-        steps.append((X(t), Y(v)))
-    steps.append((X(t1), Y(pts[-1][1])))
-    pdf.polyline(steps, 1.1, up if r["net"] >= 0 else down)
+    def stepped(path):                                   # a balance moves in steps: hold each level until the next deal
+        out = []
+        for i, (t, v) in enumerate(path):
+            if i:
+                out.append((X(t), Y(path[i - 1][1])))
+            out.append((X(t), Y(v)))
+        out.append((X(t1), Y(path[-1][1])))
+        return out
+    if acct:
+        pdf.polyline(stepped(acct), 0.8, (0.6, 0.6, 0.6))
+    pdf.polyline(stepped(pts), 1.1, up if r["net"] >= 0 else down)
     pdf.text(L + 50, y + ch_h - 5, _day(t0), 7, color=grey)
     pdf.text(R - 10, y + ch_h - 5, _day(t1 - 1), 7, color=grey, align="right")
     y += ch_h + 14
+    if acct:
+        pdf.text(L, y, "Grey: the account balance with taxes, deposits and withdrawals; it ends at the real balance "
+                       f"{_money(r['end_balance'], cur)}.", 7.5, color=grey)
+        pdf.text(L, y + 10, "Colour: start balance + result before tax; the drawdown is measured on it.", 7.5, color=grey)
+        y += 21
     if r["other"] and abs(r["other"]) >= 0.01:
         pdf.text(L, y, f"Net result {M(r['net'], unit=True)} = closed positions {M(r['net'] - r['other'])} "
                        f"+ other balance changes {M(r['other'])} (costs of positions still open, entry costs paid before the period).",
@@ -416,30 +459,58 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
 
     # ---- days and symbols
     y = heading(new_page(), "Result per day (UTC)")
-    y = table(y, [("Day", L, "left"), ("Positions closed", L + 160, "right"), ("Net, % of start" if pct else "Net", L + 270, "right"),
-                  ("Day %", L + 340, "right"), ("Since start" if pct else "Balance", R, "right")],
-              [[(d["day"], None), (str(d["trades"]), None), (M(d["net"]), col(d["net"])), (_pct(d["pct"]), col(d["net"])),
-                (B(d["balance"]), None)] for d in r["days"]])
+    show_tax, show_book = known and itemised, known
+    cols_ = [("Day", L, "left"), ("Positions", L + 110, "right"), ("Net, % of start" if pct else "Net", L + 190, "right"),
+             ("Day %", L + 250, "right")]
+    cols_ += [("Tax", L + 320, "right")] if show_tax else []
+    cols_ += [("Other bookings" if show_tax else "Bookings", L + 410, "right")] if show_book else []
+    cols_ += [("Since start" if pct else "Balance", R, "right")]
+
+    def day_row(d):
+        row = [(d["day"], None), (str(d["trades"]), None), (M(d["net"]), col(d["net"])), (_pct(d["pct"]), col(d["net"]))]
+        row += [(M(d["tax"]) if d["tax"] else "", col(d["tax"]))] if show_tax else []
+        other = d["bookings"] - (d["tax"] if show_tax else 0)
+        row += [(M(other) if abs(other) >= 0.005 else "", col(other))] if show_book else []
+        return row + [(B(d["perf_balance"] if pct else d["balance"]), None)]
+    y = table(y, cols_, [day_row(d) for d in r["days"]])
+    if show_book and not pct:
+        pdf.text(L, y - 2, "Balance = account balance at the end of the day (UTC): result + taxes + deposits and withdrawals.", 7.5,
+                 color=grey)
+        y += 10
     y = heading(y + 6, "Result per symbol")
     y = table(y, [("Symbol", L, "left"), ("Positions", L + 160, "right"), ("Win rate", L + 250, "right"), ("Net, % of start" if pct else "Net", R, "right")],
               [[(s["symbol"] or "-", None), (str(s["trades"]), None), (_pct(s["wins"] / s["trades"] * 100, False), None),
                 (M(s["net"]), col(s["net"]))] for s in r["symbols"]])
 
-    # ---- taxes and the other balance bookings
+    # ---- taxes and the other balance bookings (tax report: every booking; performance report: taxes as one figure)
     if known:
-        y = heading(y + 6, "Taxes and other balance bookings")
-        totals = [("Taxes withheld", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] < 0)),
-                  ("Tax refunds", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] > 0)),
-                  ("Net tax", r["taxes"]), ("Fees, interest, dividend adjustments (counted in the result)", r["cash_result"]),
-                  ("Deposits", r["deposits"]), ("Withdrawals", r["withdrawals"]), ("Corrections (not counted)", r["cash_other"])]
+        y = heading(y + 6, "Taxes and other balance bookings" if itemised else "Balance bookings")
+        tax_rows = ([("Taxes withheld", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] < 0)),
+                     ("Tax refunds", sum(c["amount"] for c in r["cash"] if c.get("type") == "TAX" and c["amount"] > 0)),
+                     ("Net tax", r["taxes"])] if itemised else [("Taxes, net (itemised in the tax report)", r["taxes"])])
+        totals = tax_rows + [("Fees, interest, dividend adjustments (counted in the result)", r["cash_result"]),
+                             ("Deposits", r["deposits"]), ("Withdrawals", r["withdrawals"]), ("Corrections (not counted)", r["cash_other"])]
         y = table(y, [("", L, "left"), ("Net, % of start" if pct else f"Amount {cur}", R, "right")],
                   [[(k, None), (M(v), col(v))] for k, v in totals])
-        if r["cash"]:
+        if itemised and r["cash"]:
+            from .taxes import months as tax_months
+            in_period = [d for d in r.get("period_deals") or [] if r["start"] <= (d.get("time") or 0) < r["end"]]
+            mrows = tax_months(in_period, r["cash"], None)
+            if any(m["withheld"] or m["refunded"] for m in mrows):
+                y = heading(y + 4, "Taxes per month")
+                y = table(y, [("Month", L, "left"), ("Result before tax", L + 150, "right"), ("Withheld", L + 230, "right"),
+                              ("Refunded", L + 300, "right"), ("Net tax", L + 370, "right"), ("After tax", L + 450, "right"),
+                              ("Rate", R, "right")],
+                          [[(m["month"], None), (M(m["result"]), col(m["result"])), (M(m["withheld"]), col(m["withheld"])),
+                            (M(m["refunded"]), col(m["refunded"])), (M(m["net_tax"]), col(m["net_tax"])),
+                            (M(m["after_tax"]), col(m["after_tax"])), (_pct(m["rate"], False), None)] for m in mrows])
+        listed = [c for c in r["cash"] if itemised or CASH_CLASS.get(c.get("type")) != "tax"]
+        if listed:
             y = table(y, [("Booking (broker)", L, "left"), ("Time UTC", L + 110, "left"), ("Type", L + 210, "left"),
                           ("Comment", L + 290, "left"), ("% of start" if pct else "Amount", R, "right")],
                       [[(str(c.get("ticket") or ""), None), (_stamp(c["time"]), None), (c.get("type") or "", None),
-                        ((c.get("comment") or "")[:40], None), (M(c.get("amount") or 0), col(c.get("amount")))] for c in r["cash"]])
-        else:
+                        ((c.get("comment") or "")[:40], None), (M(c.get("amount") or 0), col(c.get("amount")))] for c in listed])
+        elif not r["cash"]:
             pdf.text(L, y, "No tax, deposit, fee or other booking in this period.", 8, color=grey)
             y += 14
 
@@ -468,6 +539,8 @@ def to_pdf(r: dict, rid: str, fp: str) -> bytes:
         "A position counts in the period in which it was closed; its result includes the costs of all its deals (commission, swap).",
         "Positions still open at the end of the period are not included. Times and day boundaries are UTC.",
         "Shown in percent: every figure is a share of the start balance; no amounts, no balances, no lot sizes." if pct else "",
+        "Performance report: taxes appear as one net figure; the tax report of the same period lists every tax booking."
+        if known and not itemised else "",
         f"The deal export available to this report starts on {_day(r['first_deal'])}." if r.get("first_deal") else "",
     ]
     chk = r.get("check") or {}
@@ -572,7 +645,8 @@ def period_bounds(kind: str, today: dt.date, frm: str | None = None, to: str | N
     return ts(today - dt.timedelta(days=29)), ts(today + dt.timedelta(days=1))
 
 
-async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, full_number: bool, units: str = "money") -> dict:
+async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, full_number: bool, units: str = "money",
+                tax_detail: str = "summed") -> dict:
     acc, deals = await _account_data(ctx, account, full_number)
     if not acc:
         return {"error": f"account {account} not found among the connected MetaTrader 5 accounts"}
@@ -595,6 +669,8 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
     recorded = {day: b for (a, day), b in stored.items() if str(a)[-3:] == tail and str(a)[:-3] in ("…", "", str(acc["label"])[:-3])}
     r["check"] = balance_check(deals, acc.get("balance") or 0.0, recorded, cash=acc.get("cash"))
     r["units"] = "percent" if units == "percent" else "money"
+    r["tax_detail"] = "itemised" if tax_detail == "itemised" else "summed"
+    r["period_deals"] = deals
     fp = fingerprint(data_block(r))
     rid = report_id(r, fp)
     pdf = lock(to_pdf(r, rid, fp))
@@ -606,7 +682,7 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
     row = {"id": rid, "created": r["generated"], "account": r["account"], "period_from": _day(start), "period_to": _day(end - 1),
            "data_sha": fp, "pdf_sha": hashlib.sha256(pdf).hexdigest(), "csv_sha": hashlib.sha256(text.encode("utf-8")).hexdigest(),
            "net": None if r["units"] == "percent" else r["net"], "net_pct": r["net_pct"], "currency": r["currency"], "trades": r["trades"],
-           "units": r["units"]}
+           "units": r["units"], "taxes": r["tax_detail"]}
     await ctx.db.run(ctx.db.report_add, row)
     return {**row, "trimmed_from": trimmed, "check": {k: v for k, v in r["check"].items() if k != "rows"},
             "summary": {k: r[k] for k in (("net_pct", "trades", "win_rate", "profit_factor", "max_dd_pct") if r["units"] == "percent"
@@ -616,7 +692,7 @@ async def issue(ctx, account: str, kind: str, frm: str | None, to: str | None, f
 def compare_blocks(old: dict, new: dict) -> list[str]:
     """Differences between an issued report's data and the same report built again (pure, tested)."""
     out = []
-    for k in ("account", "currency", "from", "to", "start_balance", "end_balance", "return_pct"):
+    for k in ("account", "currency", "from", "to", "start_balance", "end_balance", "return_pct", "tax_net"):
         if old.get(k) != new.get(k):
             out.append(f"{k}: report {old.get(k)} - rebuilt {new.get(k)}")
     po, pn = {p[0]: p for p in old.get("positions", [])}, {p[0]: p for p in new.get("positions", [])}
@@ -682,6 +758,7 @@ async def recheck(ctx, rid: str) -> dict:
     r = build(deals, {"label": acc["label"], "currency": acc.get("currency"), "balance": acc.get("balance"), "server": acc.get("server"),
                       "company": acc.get("company")}, start, end, cash=acc.get("cash") if "cash" in old else None)
     r["units"] = meta.get("units", "money")
+    r["tax_detail"] = meta.get("tax_detail")
     new = data_block(r)
     diffs = compare_blocks(old, new)
     return {"report_id": rid, "reproducible": True, "identical": not diffs, "differences": diffs, "explained": explain(old, new),
@@ -697,7 +774,7 @@ def _block_from_csv(text: str) -> dict:
     table = [r for r in (rest[:cut2] if cut2 is not None else rest) if r]
     cash_rows = [r for r in rest[cut2 + 1:] if r] if cut2 is not None else []
     out = {k: meta.get(k) for k in ("account", "currency", "from", "to")}
-    for k in ("start_balance", "end_balance", "return_pct"):
+    for k in ("start_balance", "end_balance", "return_pct", "tax_net"):
         if meta.get(k) not in (None, ""):
             out[k] = float(meta[k])
     out["positions"] = [[p[0], p[1], p[2], p[3], p[4], float(p[5]) if p[5] != "" else "", float(p[6])] for p in table[1:]]

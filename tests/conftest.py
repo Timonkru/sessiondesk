@@ -58,6 +58,7 @@ def mock_http():
 def client(tmp_path, mock_http, monkeypatch):
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))      # the MT5 default folder must not find a real terminal's export
     app = create_app(tmp_path, start_background=False, http=mock_http, token=TOKEN)
     with TestClient(app) as c:
         c.headers.update(HDR)

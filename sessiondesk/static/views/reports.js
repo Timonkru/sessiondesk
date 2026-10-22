@@ -43,16 +43,21 @@ export async function render(root, _params, ctx) {
       h("option", { value: "money" }, "amounts and %"), h("option", { value: "percent" }, "% only"));
     try { units.value = localStorage.getItem("sd.reportUnits") || "money"; } catch { /* storage blocked */ }
     units.addEventListener("change", () => { try { localStorage.setItem("sd.reportUnits", units.value); } catch { /* storage blocked */ } });
+    // 2026-10-22: performance report (taxes as one figure) or tax report (every tax booking, taxes per month and day)
+    const kind = h("select", { title: "Performance report: taxes as one net figure. Tax report: every tax booking listed, taxes per month and per day." },
+      h("option", { value: "summed" }, "performance (taxes summed)"), h("option", { value: "itemised" }, "tax report (taxes itemised)"));
+    try { kind.value = localStorage.getItem("sd.reportTaxes") || "summed"; } catch { /* storage blocked */ }
+    kind.addEventListener("change", () => { try { localStorage.setItem("sd.reportTaxes", kind.value); } catch { /* storage blocked */ } });
     const go = h("button", { onclick: async () => {
       go.disabled = true; clear(result, loading("Building the report…"));
-      const r = await api("/api/reports", { method: "POST", body: { account: acc.value, period: per.value, from: frm.value, to: to.value, full_number: full.checked, units: units.value } });
+      const r = await api("/api/reports", { method: "POST", body: { account: acc.value, period: per.value, from: frm.value, to: to.value, full_number: full.checked, units: units.value, taxes: kind.value } });
       go.disabled = false;
       if (r.error) { clear(result, errorBox(r.error)); return; }
       const s = r.summary, pctOnly = r.units === "percent";
       clear(result, h("div", { class: "keystrip" }, [["Report", r.id], ["Period", `${r.period_from} to ${r.period_to}`],
         ["Net", h("span", { class: dir(s.net) }, pctOnly ? pct(s.net_pct, 2) : `${num(s.net, 2)} ${r.currency || ""} (${pct(s.net_pct, 2)})`)], ["Positions", s.trades],
         ["Win rate", s.win_rate == null ? "–" : pct(s.win_rate, 0, false)], ["Max drawdown", pctOnly ? pct(s.max_dd_pct, 2, false) : `${num(s.max_dd, 2)} (${pct(s.max_dd_pct, 2, false)})`],
-        ["Shown as", pctOnly ? "% only" : "amounts and %"]]
+        ["Shown as", pctOnly ? "% only" : "amounts and %"], ["Kind", r.taxes === "itemised" ? "tax report" : "performance"]]
         .map(([k, v]) => h("div", null, h("span", { class: "k" }, k), h("span", { class: "v" }, v)))),
         h("p", null, h("strong", null, "Download: "), links(r)),
         !r.check || !r.check.days ? note("Balance check: no recorded day-start balances for this account yet - the start balance is reconstructed and unchecked.", "warn")
@@ -64,7 +69,7 @@ export async function render(root, _params, ctx) {
       load();
     } }, "Create report");
     clear(form, h("div", { class: "toolbar" }, h("label", null, "Account ", acc), h("label", null, "Period ", per), dates,
-      h("label", null, "Show ", units),
+      h("label", null, "Report ", kind), h("label", null, "Show ", units),
       h("label", { title: "Without it the account shows as …638, as everywhere in SessionDesk (Settings → Privacy)" }, full, " full account number"), go),
     note("From the MetaTrader 5 deal history the terminal exports - nothing typed in. The PDF opens without a password but is locked against editing, carries a watermark with its report ID on every page and the fingerprint of its data; the CSV has the same data, so a changed number shows when the fingerprint is recomputed. It is your own software's statement, not an audit: for independent proof compare the position IDs with the broker's statement or give read-only (investor) access."));
   };
@@ -72,6 +77,7 @@ export async function render(root, _params, ctx) {
   const drawIssued = (rows) => clear(issued, table([
     { label: "Report", render: (r) => h("code", null, r.id) }, { label: "Created", render: (r) => stamp(r.created) },
     { label: "Account", render: (r) => r.account }, { label: "Period", render: (r) => `${r.period_from} to ${r.period_to}` },
+    { label: "Kind", render: (r) => (r.taxes === "itemised" ? "tax report" : r.taxes === "summed" ? "performance" : h("span", { class: "muted small" }, "–")) },
     { label: "Net", num: true, cls: (r) => dir(r.net_pct), render: (r) => (r.units === "percent" || r.net == null ? h("span", { class: "muted small" }, "% only") : `${num(r.net, 2)} ${r.currency || ""}`) },
     { label: "%", num: true, cls: (r) => dir(r.net_pct), render: (r) => pct(r.net_pct, 2) },
     { label: "Positions", num: true, render: (r) => r.trades }, { label: "", render: links },

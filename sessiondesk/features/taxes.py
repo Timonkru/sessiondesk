@@ -20,18 +20,18 @@ def _month(ts: float) -> str:
     return dt.datetime.fromtimestamp(ts, UTC).strftime("%Y-%m")
 
 
-def months(deals: list[dict], cash: list[dict], year: int) -> list[dict]:
-    """Per month of the year: trading result before tax, taxes withheld / refunded, net tax, effective rate, deposits,
-    withdrawals, fees (pure, tested)."""
+def months(deals: list[dict], cash: list[dict], year: int | None) -> list[dict]:
+    """Per month of the year (None: of whatever the rows span): trading result before tax, taxes withheld / refunded,
+    net tax, effective rate, deposits, withdrawals, fees (pure, tested)."""
     rows: dict[str, dict] = defaultdict(lambda: {"result": 0.0, "withheld": 0.0, "refunded": 0.0, "deposits": 0.0, "withdrawals": 0.0,
                                                  "fees": 0.0, "bookings": 0})
     for d in deals:
         t = d.get("time")
-        if t and dt.datetime.fromtimestamp(t, UTC).year == year:
+        if t and (year is None or dt.datetime.fromtimestamp(t, UTC).year == year):
             rows[_month(t)]["result"] += d.get("net") or 0
     for c in cash:
         t, v = c.get("time"), c.get("amount") or 0
-        if not t or dt.datetime.fromtimestamp(t, UTC).year != year:
+        if not t or (year is not None and dt.datetime.fromtimestamp(t, UTC).year != year):
             continue
         r, kind = rows[_month(t)], CASH_CLASS.get(c.get("type"), "other")
         r["bookings"] += 1

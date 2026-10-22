@@ -743,7 +743,8 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import report
         b = await request.json()
         return await report.issue(C(), str(b.get("account") or ""), str(b.get("period") or "last_30"), b.get("from"), b.get("to"),
-                                  bool(b.get("full_number")), "percent" if b.get("units") == "percent" else "money")
+                                  bool(b.get("full_number")), "percent" if b.get("units") == "percent" else "money",
+                                  "itemised" if b.get("taxes") == "itemised" else "summed")
 
     @app.get("/api/reports/file/{name}")
     async def get_report_file(name: str, view: bool = False):

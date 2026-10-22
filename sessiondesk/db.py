@@ -59,6 +59,8 @@ class DB:
         self._conn.executescript(SCHEMA)
         if "units" not in {r[1] for r in self._conn.execute("PRAGMA table_info(reports)")}:
             self._conn.execute("ALTER TABLE reports ADD COLUMN units TEXT")
+        if "taxes" not in {r[1] for r in self._conn.execute("PRAGMA table_info(reports)")}:
+            self._conn.execute("ALTER TABLE reports ADD COLUMN taxes TEXT")
         self.fts = self._try_fts()
 
     def _try_fts(self) -> bool:
@@ -260,9 +262,9 @@ class DB:
 
     # ------------------------------------------------------------ issued performance reports (register)
     def report_add(self, r: dict) -> None:
-        self._exec("INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                   tuple(r.get(k) for k in ("id", "created", "account", "period_from", "period_to", "data_sha", "pdf_sha", "csv_sha",
-                                            "net", "net_pct", "currency", "trades", "units")))
+        keys = ("id", "created", "account", "period_from", "period_to", "data_sha", "pdf_sha", "csv_sha", "net", "net_pct", "currency",
+                "trades", "units", "taxes")
+        self._exec(f"INSERT OR REPLACE INTO reports ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})", tuple(r.get(k) for k in keys))
 
     def report_find(self, sha: str) -> dict | None:
         rows = self._exec("SELECT * FROM reports WHERE pdf_sha = ? OR csv_sha = ? OR data_sha = ?", (sha, sha, sha))
