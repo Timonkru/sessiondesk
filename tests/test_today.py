@@ -172,3 +172,16 @@ def test_timeline_results():
     assert r["verdict"] == "above" and r["actual"] == "2.8%"
     e = timeline.earnings_result({"eps_actual": "$1.20", "eps_forecast": "$1.00", "surprise_pct": 20.0, "beat": True, "move": -3.1})
     assert e["verdict"] == "beat" and e["move"] == -3.1
+
+
+def test_nasdaq_eps_only_with_surprise_and_yahoo_match():
+    from sessiondesk.connectors.public import nasdaq_actual
+    from sessiondesk.features.earnings_reported import yahoo_match
+    # LRCX 2026-10-21 before Nasdaq had the result: "eps" is the year-ago quarter
+    assert nasdaq_actual({"eps": "$1.26", "surprise": "N/A", "epsForecast": "$2.17"}) is None
+    assert nasdaq_actual({"eps": "$2.20", "surprise": "1.38"}) == "$2.20"
+    assert nasdaq_actual({"eps": "", "surprise": "5"}) is None
+    hist = [{"when": "2026-10-21T16:00:00-04:00", "eps_estimate": 2.18, "eps_reported": 2.20},
+            {"when": "2025-10-22T16:00:00-04:00", "eps_estimate": 1.22, "eps_reported": 1.26}]
+    assert yahoo_match(hist, "2026-10-21")["eps_reported"] == 2.20
+    assert yahoo_match([{"when": "2026-10-21T16:00:00-04:00", "eps_estimate": 2.18, "eps_reported": None}], "2026-10-21") is None

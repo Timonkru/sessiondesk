@@ -153,6 +153,7 @@ export async function render(root, _params, ctx) {
         { label: "S&P 500", num: true, cls: (r) => dir(r.market), render: (r) => (r.market == null ? "–" : pct(r.market, 1)) },
         { label: "vs market", num: true, cls: (r) => dir(r.excess), render: (r) => (r.excess == null ? "–" : pct(r.excess, 1)) },
         { label: "Why", render: (r) => h("span", { class: "small muted" }, r.why || "") },
+        { label: "Source", render: (r) => h("span", { class: "small muted" }, r.source || "") },
       ], keep, { empty: "No relevant report in the last trading days." })),
       note(reported && reported.note ? reported.note + " AMC = after the close, BMO = before the open; 'pending' = the reaction session has not closed yet." : ""));
     ctx.setContext({ page: "Earnings reported", summary: s, reports: keep.slice(0, 80).map((r) => ({ date: r.date, timing: r.timing, symbol: r.symbol,

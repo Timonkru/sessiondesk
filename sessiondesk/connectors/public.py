@@ -278,8 +278,18 @@ def parse_nasdaq_earnings(payload: dict, day: dt.date) -> list[dict]:
                     "timing": timing.get(r.get("time"), r.get("time") or "n/a"),
                     "eps_forecast": r.get("epsForecast") or None, "estimates": r.get("noOfEsts") or None,
                     "market_cap": r.get("marketCap") or None, "last_year_eps": r.get("lastYearEPS") or None,
-                    "eps_actual": r.get("eps") or None})             # filled once the company has reported
+                    "eps_actual": nasdaq_actual(r)})
     return out
+
+
+def nasdaq_actual(row: dict) -> str | None:
+    """Nasdaq's reported EPS - only once it carries a surprise. Until Nasdaq has the new figure, its "eps" field holds
+    the year-ago quarter (LRCX on 2026-10-21: "$1.26" = the Oct 2025 quarter, surprise "N/A"), which would read as a
+    miss of 40 % (pure, tested)."""
+    eps, surprise = (row.get("eps") or "").strip(), str(row.get("surprise") or "").strip()
+    if not eps or eps.upper() == "N/A" or not surprise or surprise.upper() == "N/A":
+        return None
+    return eps
 
 
 def _json_dumps(x) -> str:
