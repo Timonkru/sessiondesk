@@ -84,6 +84,7 @@ async def screen(ctx, key: str) -> dict:
                      **met, "market_cap": _num(prof.get("market_cap")), "pe_fwd": pe if pe is not None and 0 < pe < 400 else None,
                      "div_yield": (_num(prof.get("dividend_yield")) or 0) * 100 if prof.get("dividend_yield") is not None else None})
     return {"key": key, "name": universe.UNIVERSES[key], "rows": rows, "asof": time.time(), "with_profile": with_profile,
+            "closes_asof": data.get("closes_asof"), "closes_stale": data.get("closes_stale"),
             "note": "Price measures from one year of daily closes (free data, refreshed hourly, today's value live). "
                     f"Market cap, forward P/E and dividend yield only where a company profile is cached ({with_profile} of {len(rows)}); "
                     "open a stock or the Indices page to fill more. A screen describes; it is not a signal."}

@@ -1,7 +1,7 @@
 // Movers: unusual-move scan over the indices you pick, biggest moves, alert history with explanations.
 // The watchlist itself lives on the Markets page; its stocks are always part of the scan.
 import { api, on } from "../lib/api.js";
-import { h, clear, table, section, pct, num, dir, stamp, clock, note, loading, errorBox, markdown } from "../lib/ui.js";
+import { h, clear, table, section, pct, num, dir, stamp, clock, day, asOf, note, loading, errorBox, markdown } from "../lib/ui.js";
 
 export async function render(root, _params, ctx) {
   const scope = h("div"), mv = h("div"), al = h("div");
@@ -37,8 +37,9 @@ export async function render(root, _params, ctx) {
     if (d.error) { clear(mv, section("Unusual moves", errorBox(d.error))); return; }
     const r = d.rules || {};
     clear(mv, section("Unusual moves",
-      h("div", { class: "toolbar" }, h("span", { class: "muted small" }, `${d.scanned} stocks scanned (${(d.universes || []).join(", ")}) at ${clock(d.asof)}`),
-        h("button", { onclick: () => loadMovers(true) }, "Scan now")),
+      h("div", { class: "toolbar" }, h("span", { class: "muted small" }, `${d.scanned} stocks traded today (${(d.universes || []).join(", ")})`
+        + (d.not_traded_today ? ` · ${d.not_traded_today} not yet today (shown below as the last session)` : "") + " · "),
+        asOf(d.asof, { label: "scanned", maxAgeHours: 0.25 }), h("button", { onclick: () => loadMovers(true) }, "Scan now")),
       note(`Flag rule: |move| ≥ ${r.min_abs_pct}% and ≥ ${r.min_abs_z} σ of the stock's own 60-day daily volatility, or ≥ ${r.always_abs_pct}% outright; watchlist from ${r.watchlist_abs_pct}% / ${r.watchlist_abs_z} σ. Change it in Settings.`),
       (d.flagged || []).length ? h("ul", { class: "feed" }, d.flagged.map((f) => h("li", null,
         h("div", { class: "t" }, h("a", { href: "#/stock/" + encodeURIComponent(f.symbol) }, f.symbol), " ", h("span", { class: dir(f.pct) }, pct(f.pct, 1)),
@@ -46,9 +47,16 @@ export async function render(root, _params, ctx) {
         h("div", { class: "small", style: { color: "var(--fg2)" } }, f.explanation),
         (f.headlines || []).length ? h("div", { class: "m" }, f.headlines.slice(0, 3).map((x) => h("div", null, "· ", x.url ? h("a", { href: x.url, target: "_blank", rel: "noopener noreferrer" }, x.title) : x.title))) : null)))
         : note("Nothing unusual right now."),
-      h("h3", null, "Biggest moves in the scan"),
+      h("h3", null, "Biggest moves today"),
       h("div", { class: "cols", style: { gap: "0 20px" } },
-        moverTable("Gainers", d.gainers || []), moverTable("Losers", d.losers || []))));
+        moverTable("Gainers", d.gainers || []), moverTable("Losers", d.losers || [])),
+      (d.previous_session || []).length ? h("div", null, h("h3", null, "Last session (not traded yet today)"),
+        note("Unusual moves of stocks whose market has not opened today - e.g. US stocks before 15:30 CET. They are the previous session's moves, not news of today."),
+        table([{ label: "", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.symbol) },
+          { label: "Δ %", num: true, cls: (r) => dir(r.pct), render: (r) => pct(r.pct, 1) },
+          { label: "σ", num: true, render: (r) => r.z != null ? num(r.z, 1) : "–" },
+          { label: "Session", render: (r) => h("span", { class: "muted small" }, day(r.time)) },
+          { label: "", render: (r) => h("span", { class: "muted small" }, r.universe || "") }], d.previous_session)) : null));
     pushCtx();
   };
   const moverTable = (title, rows) => h("div", null, h("div", { class: "muted small" }, title), table([

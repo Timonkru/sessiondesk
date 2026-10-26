@@ -297,9 +297,14 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     async def get_movers():
         ctx = C()
         last = ctx.cache.peek("movers:last")
-        if last:
+        every_s = max(60, (ctx.settings.get("alerts") or {}).get("scan_minutes", 5) * 60)
+        if last and (not market_hours() or time.time() - (last.get("asof") or 0) < 2 * every_s):
             return last
-        return await ctx.cache.get("movers:last", 240, lambda_scan(ctx))
+        # no scan yet, or the last one is older than two scan intervals while markets trade: scan now, do not
+        # hand out the old list as current
+        res = await movers.scan(ctx)
+        ctx.cache.invalidate("movers:last")
+        return await ctx.cache.get("movers:last", 10 ** 9, lambda_scan(ctx, res))
 
     @app.post("/api/movers/scan")
     async def scan_now():
@@ -649,7 +654,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
 
         async def build():
             return await stocklist.stocks(ctx, scope, group, industry)
-        return await ctx.cache.get(f"stocks:{scope}:{group}:{industry}", 60, build)
+        return await ctx.cache.get(f"stocks:{scope}:{group}:{industry}", 60, build, swr=False)
 
     @app.get("/api/screener/{key}")
     async def get_screener(key: str):
@@ -658,7 +663,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
 
         async def build():
             return await screener.screen(ctx, key)
-        return await ctx.cache.get(f"screen:{key}", 60, build)
+        return await ctx.cache.get(f"screen:{key}", 60, build, swr=False)   # a screen shows now, not the build before
 
     async def _rates_world(ctx):
         from .features import rates_world

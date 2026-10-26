@@ -80,19 +80,23 @@ class Yahoo(Connector):
             raise ConnectorError(str(next(r for r in results if isinstance(r, Exception))))
         return out
 
-    async def daily_closes(self, symbols: list[str], range_: str = "3mo") -> dict[str, list[float]]:
-        """{symbol: [daily closes]} for volatility / beta estimates (spark, 20 per call)."""
+    async def daily_closes(self, symbols: list[str], range_: str = "3mo", *, with_time: bool = False):
+        """{symbol: [daily closes]} for volatility / beta estimates (spark, 20 per call).
+        with_time=True returns (closes, {symbol: timestamp of the last bar}) - the last bar's session start."""
         chunks = [symbols[i:i + 20] for i in range(0, len(symbols), 20)]
         results = await asyncio.gather(*(self._spark(c, range_, "1d") for c in chunks), return_exceptions=True)
-        out = {}
+        out, last = {}, {}
         for res in results:
             if isinstance(res, Exception):
                 continue
             for sym, d in res.items():
-                closes = [c for c in (d.get("close") or []) if _num(c) is not None]
-                if closes:
-                    out[sym] = [float(c) for c in closes]
-        return out
+                closes, stamps = d.get("close") or [], d.get("timestamp") or []
+                stamps = stamps if len(stamps) == len(closes) else [None] * len(closes)
+                pairs = [(float(c), t) for c, t in zip(closes, stamps) if _num(c) is not None]
+                if pairs:
+                    out[sym] = [c for c, _ in pairs]
+                    last[sym] = pairs[-1][1]
+        return (out, last) if with_time else out
 
     async def daily_series(self, symbols: list[str], range_: str = "2y") -> dict[str, list[tuple[str, float]]]:
         """{symbol: [(YYYY-MM-DD, close)]} - dated daily closes (spark, 20 per call), for the data hub."""

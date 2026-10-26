@@ -8,6 +8,12 @@ share that one build instead of hitting the provider N times.
 Builders return a dict. A failing builder never raises to the caller: the last good value comes
 back marked stale, or {"error": text} if there never was one. After a failure the key is not
 rebuilt for RETRY_SECONDS, so a dead provider is not hammered on every request.
+
+Stale-while-revalidate only covers a short grace window. A value far past its ttl (typically a disk
+copy from days ago, read after a restart) is not handed out as if it were current: the caller waits
+up to WAIT_SECONDS for the rebuild and gets the old value (marked stale) only if the build is slower
+or fails. Measured 26.10.2026: the first Macro view after a restart showed FRED data from 21.10. and
+the screener computed "today" from closes of 21.10., because the old disk copy came back at once.
 """
 from __future__ import annotations
 
@@ -21,6 +27,12 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 RETRY_SECONDS = 60.0
+WAIT_SECONDS = 12.0
+
+
+def grace(ttl: float) -> float:
+    """How long past its ttl a value may still be served at once while it rebuilds (pure, tested)."""
+    return max(ttl, 120.0)
 
 
 @dataclass
@@ -98,12 +110,19 @@ class Cache:
             may_retry = now >= entry.retry_at
             if not entry.has_value and not may_retry:
                 return {"error": entry.error or "unavailable"}
-            if entry.has_value and (swr or not may_retry):
+            far_stale = entry.has_value and now - entry.ts > ttl + grace(ttl)
+            if entry.has_value and ((swr and not far_stale) or not may_retry):
                 if may_retry and key not in self._inflight:
                     self._start(key, build, disk, retry)
                 return _decorate(entry, refreshing=key in self._inflight, expired=True)
         fut = self._inflight.get(key) or self._start(key, build, disk, retry)
-        await asyncio.shield(fut)
+        if entry and entry.has_value:
+            try:                                    # far past its ttl: wait for the rebuild, but not forever
+                await asyncio.wait_for(asyncio.shield(fut), WAIT_SECONDS)
+            except asyncio.TimeoutError:
+                return _decorate(self._mem.get(key) or entry, refreshing=True, expired=True)
+        else:
+            await asyncio.shield(fut)
         entry = self._mem[key]
         if not entry.has_value:
             return {"error": entry.error or "unavailable"}

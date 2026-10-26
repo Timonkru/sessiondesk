@@ -32,6 +32,35 @@ def test_cache_fresh_swr_and_single_flight():
     asyncio.run(run())
 
 
+def test_cache_far_stale_value_waits_for_the_rebuild(tmp_path):
+    async def run():
+        import json
+        cache = Cache(tmp_path)
+        path = cache._file("k")
+        path.write_text(json.dumps({"ts": time.time() - 5 * 86400, "value": {"v": "old disk copy"}}), encoding="utf-8")
+
+        async def build():
+            await asyncio.sleep(0.01)
+            return {"v": "fresh"}
+        got = await cache.get("k", 3600, build, disk=True)        # five days old: not served as current
+        assert got["v"] == "fresh" and not got.get("stale")
+
+        async def slow():
+            await asyncio.sleep(0.3)
+            return {"v": "late"}
+        cache._mem["k"].ts = time.time() - 5 * 86400
+        import sessiondesk.cache as cmod
+        old_wait, cmod.WAIT_SECONDS = cmod.WAIT_SECONDS, 0.05
+        try:
+            got = await cache.get("k", 3600, slow)                 # build slower than the wait: old value, marked
+            assert got["v"] == "fresh" and got["stale"] and got["refreshing"]
+        finally:
+            cmod.WAIT_SECONDS = old_wait
+        await asyncio.sleep(0.4)
+        assert (await cache.get("k", 3600, slow))["v"] == "late"
+    asyncio.run(run())
+
+
 def test_cache_failure_keeps_last_good_value_and_backs_off():
     async def run():
         cache, state = Cache(), {"fail": False, "n": 0}

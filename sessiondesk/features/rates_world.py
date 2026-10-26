@@ -190,6 +190,15 @@ async def world(ctx) -> dict:
         res = await asyncio.gather(*(fred.series(s) for s in list(ids.values()) + ["DFF"]), return_exceptions=True)
         curve = {t: r["points"][-1] for t, r in zip(ids, res) if not isinstance(r, Exception) and r.get("points")}
         pol = res[-1]["points"][-1] if not isinstance(res[-1], Exception) and res[-1].get("points") else None
+        treasury = ctx.hub.get("treasury")
+        try:                                            # the Treasury's own file is a day or two ahead of FRED
+            last = (await treasury.curve())["days"][-1] if treasury and treasury.active() else None
+        except Exception:
+            last = None
+        if last and last["date"] >= max((v[0] for v in curve.values()), default=""):
+            curve = {t: (last["date"], last["yields"][t]) for t in ids if t in last["yields"]}
+            return _row("United States", pol, "Fed funds (effective)", curve, "2y", "U.S. Treasury (par curve); Fed funds FRED",
+                        "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve")
         return _row("United States", pol, "Fed funds (effective)", curve, "2y", "FRED", "https://fred.stlouisfed.org/series/DGS2")
 
     async def euro():

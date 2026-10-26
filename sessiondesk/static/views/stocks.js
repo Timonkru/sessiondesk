@@ -2,7 +2,7 @@
 // industry. Replaces the former Screener (#/screener/<index> still lands here).
 import { api } from "../lib/api.js";
 import { h, clear, note, loading, errorBox, ago } from "../lib/ui.js";
-import { stockTable, crumbs } from "../lib/stocktable.js";
+import { stockTable, crumbs, listStamp } from "../lib/stocktable.js";
 
 export async function render(root, params, ctx) {
   const uni = (await api("/api/universes", { ttl: 600000 })).items || [];
@@ -20,5 +20,5 @@ export async function render(root, params, ctx) {
     body);
   const d = await api(`/api/stocks?scope=${encodeURIComponent(scope)}`, { ttl: 60000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
-  clear(body, stockTable(d.rows, { ctx, name: `Stocks - ${label}`, group: "none" }), note(d.note));
+  clear(body, listStamp(d), stockTable(d.rows, { ctx, name: `Stocks - ${label}`, group: "none" }), note(d.note));
 }

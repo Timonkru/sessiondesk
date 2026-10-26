@@ -1,7 +1,7 @@
 // Commodities & energy: futures by group with 1 day to 1 year, power prices, EU gas imports (ENTSOG) and storage (AGSI+),
 // EIA oil and gas inventories, sources to connect for more.
 import { api } from "../lib/api.js";
-import { h, clear, table, section, num, pct, price, dir, sparkline, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, table, section, num, pct, price, dir, sparkline, note, loading, errorBox, asOf, stamp } from "../lib/ui.js";
 
 const FLOW_TOTALS = new Set(["entsog:total", "entsog:lng_total"]);
 const flowName = (s) => s.name.replace(/ \(GWh\/d\)$/, "").replace(/^LNG send-out (?!EU total)/, "LNG · ");
@@ -24,11 +24,14 @@ export async function render(root, _params, ctx) {
       h("a", { href: "#/monitor/gold" }, "Gold & precious metals"), h("span", { class: "small muted" }, " - curve, inventories, positioning, releases and headlines on one page")), body);
   const d = await api("/api/commodities", { ttl: 300000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
-  const left = h("div"), right = h("div");
+  const left = h("div", null, h("p", { class: "small" }, asOf(d.asof, { label: "prices fetched", maxAgeHours: 0.5, stale: d.stale }))), right = h("div");
   for (const g of d.groups || []) {
     left.appendChild(section(g.group, table([
-      { label: "", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.name) },
+      { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol), title: r.exchange || "" }, r.name),
+        r.contract ? h("div", { class: "muted small" }, r.contract + (r.next && r.next.last != null ? ` · next ${r.next.label} ${price(r.next.last)}` : "")) : null] },
       { label: "Last", num: true, render: (r) => price(r.last) },
+      { label: "Unit", render: (r) => h("span", { class: "muted small" }, r.unit || "") },
+      { label: "Close of", render: (r) => h("span", { class: "muted small", title: "date of the latest daily bar (today = still trading)" }, r.day) },
       ...PERIODS.map(([k, label]) => ({ label, num: true, cls: (r) => dir(r[k]), render: (r) => pct(r[k], 1) })),
       { label: "60 days", num: true, render: (r) => sparkline(r.spark) },
     ], g.rows, { empty: "No prices." })));
@@ -77,7 +80,7 @@ export async function render(root, _params, ctx) {
       { label: "Series", render: (s) => h("a", { href: "#/hub/" + encodeURIComponent(s.id) }, s.name) },
       { label: "Latest", num: true, render: (s) => num(s.last, 1) },
       { label: "Week change", num: true, cls: (s) => dir(s.change), render: (s) => (s.change == null ? "–" : `${s.change > 0 ? "+" : ""}${num(s.change, 1)}`) },
-      { label: "Week", render: (s) => h("span", { class: "muted small" }, s.day) },
+      { label: "Week ending", render: (s) => h("span", { class: "muted small" }, s.day) },
       { label: "Source", render: (s) => (s.url ? h("a", { class: "small", href: s.url, target: "_blank", rel: "noopener noreferrer", title: s.source }, "EIA ↗") : "") },
     ], d.fundamentals || [], { empty: "Not collected yet - Data hub → collect now." }),
       note("Crude, products and US gas storage from the EIA weekly reports. Each series has its history, chart, CSV and early warnings in the Data hub.")),

@@ -5,11 +5,11 @@ from ..ai.providers import PROVIDERS
 from .base import Ctx, Hub, PlannedConnector
 from .keyed import FMP, Agsi, AlphaVantage, Alpaca, Finnhub, Polygon, TradingEconomics
 from .mt5 import MT5Bridge
-from .public import Cftc, FFCalendar, Fred, NasdaqEarnings, Sec
+from .public import Cftc, Cnbc, FFCalendar, Fred, NasdaqEarnings, Sec, Treasury
 from .rss import Rss
 from .yahoo import Yahoo
 
-ALL = (Yahoo, Rss, FFCalendar, Fred, Cftc, Sec, NasdaqEarnings, MT5Bridge,
+ALL = (Yahoo, Rss, FFCalendar, Fred, Treasury, Cnbc, Cftc, Sec, NasdaqEarnings, MT5Bridge,
        Finnhub, FMP, Polygon, AlphaVantage, TradingEconomics, Alpaca, Agsi) + PROVIDERS
 
 from .ais import AisStream  # noqa: E402  (websocket connector, own module)

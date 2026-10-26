@@ -17,18 +17,43 @@ OVERVIEW: list[tuple[str, list[tuple[str, str]]]] = [
                       ("^AXJO", "ASX 200"), ("^NZ50", "NZX 50"), ("^STI", "Singapore STI"), ("^JKSE", "Jakarta Composite")]),
     ("Middle East & Africa", [("^TA125.TA", "Tel Aviv 125"), ("XU100.IS", "Borsa Istanbul 100"), ("^J203.JO", "South Africa All Share")]),
     ("Futures", [("ES=F", "S&P 500 fut"), ("NQ=F", "Nasdaq fut"), ("YM=F", "Dow fut"), ("RTY=F", "Russell fut")]),
-    ("Rates", [("^IRX", "US 3m"), ("^FVX", "US 5y"), ("^TNX", "US 10y"), ("^TYX", "US 30y")]),
+    ("Rates", [("US3M", "US 3m"), ("US2Y", "US 2y"), ("US5Y", "US 5y"), ("US10Y", "US 10y"), ("US30Y", "US 30y"),
+               ("DE2Y-DE", "Germany 2y"), ("DE10Y-DE", "Germany 10y"), ("GB10Y-GB", "UK 10y")]),
     ("FX", [("DX-Y.NYB", "Dollar index"), ("EURUSD=X", "EUR/USD"), ("USDJPY=X", "USD/JPY"), ("GBPUSD=X", "GBP/USD"),
             ("USDCHF=X", "USD/CHF"), ("AUDUSD=X", "AUD/USD"), ("USDCNY=X", "USD/CNY")]),
     ("Commodities", [("GC=F", "Gold"), ("SI=F", "Silver"), ("CL=F", "WTI crude"), ("BZ=F", "Brent"),
-                     ("NG=F", "Natural gas"), ("HG=F", "Copper")]),
+                     ("NG=F", "US gas Henry Hub ($/MMBtu)"), ("TTF=F", "EU gas TTF (EUR/MWh)"), ("HG=F", "Copper")]),
     ("Crypto", [("BTC-USD", "Bitcoin"), ("ETH-USD", "Ether"), ("SOL-USD", "Solana")]),
     ("Volatility", [("^VIX", "VIX"), ("^VIX9D", "VIX 9-day"), ("^VIX3M", "VIX 3-month"), ("^VVIX", "VVIX"), ("^MOVE", "MOVE")]),
     ("US sectors", [("XLK", "Technology"), ("XLC", "Communication"), ("XLY", "Discretionary"), ("XLF", "Financials"),
                     ("XLV", "Health care"), ("XLI", "Industrials"), ("XLE", "Energy"), ("XLB", "Materials"),
                     ("XLP", "Staples"), ("XLU", "Utilities"), ("XLRE", "Real estate")]),
 ]
-YIELD_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"}
+# Bond yields come from CNBC, which quotes them around the clock; the Cboe indices on Yahoo (^TNX ...) only move in
+# US hours, so a European morning showed Friday's close as "today". Cboe stays the fallback and the chart link.
+CNBC_YIELDS = {"US3M": "^IRX", "US2Y": None, "US5Y": "^FVX", "US10Y": "^TNX", "US30Y": "^TYX",
+               "DE2Y-DE": None, "DE10Y-DE": None, "GB10Y-GB": None, "FR10Y-FR": None, "IT10Y-IT": None, "ES10Y-ES": None}
+YIELD_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"} | set(CNBC_YIELDS)
+
+
+async def yield_quotes(ctx, symbols: list[str]) -> dict:
+    """{symbol: Quote} for CNBC yield symbols; Cboe via Yahoo where CNBC fails. Each quote names its source."""
+    want = [s for s in symbols if s in CNBC_YIELDS]
+    if not want:
+        return {}
+    cnbc = ctx.hub.get("cnbc")
+
+    async def build():
+        got = await cnbc.quotes(want) if cnbc and cnbc.active() else {}
+        return {"quotes": got} if got else {"error": "CNBC returned no yields"}
+    data = await ctx.cache.get("yields:" + ",".join(want), 30, build)
+    out = {s: {**q, "source": "cnbc"} for s, q in (data.get("quotes") or {}).items()}
+    fallback = {CNBC_YIELDS[s]: s for s in want if s not in out and CNBC_YIELDS.get(s)}
+    if fallback:
+        res = await get_quotes(ctx, list(fallback), intraday=True)
+        for ysym, q in (res.get("quotes") or {}).items():
+            out[fallback[ysym]] = {**q, "source": q.get("source", "yahoo") + " (Cboe, US hours only)"}
+    return out
 
 
 async def get_quotes(ctx, symbols: list[str], *, intraday: bool = True) -> dict:
@@ -58,20 +83,29 @@ async def get_quotes(ctx, symbols: list[str], *, intraday: bool = True) -> dict:
 
 async def overview(ctx) -> dict:
     groups = ctx.settings.get("overview_groups") or OVERVIEW
-    symbols = [s for _, items in groups for s, _ in items]
+    from . import futures
+    fronts = {s: futures.front(s) for _, items in groups for s, _ in items}     # energy: the exchange's front contract
+    symbols = [(fronts[s]["symbol"] if fronts[s] else s) for _, items in groups for s, _ in items if s not in CNBC_YIELDS]
 
     async def build():
         return await get_quotes(ctx, symbols, intraday=True)
     data = await ctx.cache.get("overview:quotes", 20, build)
     if "error" in data:
         return data
-    quotes = data.get("quotes", {})
+    quotes = dict(data.get("quotes", {}))
+    try:
+        quotes.update(await yield_quotes(ctx, [s for _, items in groups for s, _ in items]))
+    except Exception:                                   # yields missing must not take the board down
+        pass
     out = []
     for title, items in groups:
         rows = []
         for sym, label in items:
-            q = quotes.get(sym)
-            row = {"symbol": sym, "label": label, **(q or {})}
+            fr = fronts.get(sym)
+            q = quotes.get(fr["symbol"] if fr else sym)
+            row = {"symbol": sym, "label": label, **(q or {}), "chart": CNBC_YIELDS.get(sym) or (None if sym in CNBC_YIELDS else sym)}
+            if fr:
+                row.update({"symbol": fr["symbol"], "chart": fr["symbol"], "label": f"{label} {fr['label']}"})
             if sym in YIELD_SYMBOLS and q and q.get("change") is not None:
                 row["change_bp"] = q["change"] * 100          # yields: show the move in basis points
             rows.append(row)

@@ -90,6 +90,18 @@ export function day(ts) {
 export function stamp(ts) {
   return ts ? new Date(ts * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 }
+// "as of" stamp for a block of data. ts = epoch seconds (when it was fetched) or "YYYY-MM-DD" (the data date).
+// Older than maxAgeHours turns amber with "(old)", so stale numbers stand out instead of looking current.
+export function asOf(ts, { maxAgeHours = 24, label = "as of", stale = false } = {}) {
+  if (!ts) return h("span", { class: "asof muted small" }, label + " –");
+  const isDate = typeof ts === "string";
+  const t = isDate ? new Date(ts + "T12:00:00").getTime() / 1000 : ts;
+  const text = isDate ? new Date(t * 1000).toLocaleDateString([], { weekday: "short", day: "2-digit", month: "short", year: "numeric" }) : stamp(ts);
+  const old = stale || Date.now() / 1000 - t > maxAgeHours * 3600;
+  return h("span", { class: "asof small " + (old ? "warn" : "muted"), title: old ? "older than expected for this source" : "" },
+    `${label} ${text}${old ? " (old)" : ""}`);
+}
+
 export function countdown(seconds) {
   const s = Math.max(0, Math.round(seconds));
   const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;

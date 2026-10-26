@@ -5,6 +5,8 @@
   cftc        CFTC Commitments of Traders (Socrata)       weekly positioning
   sec         SEC EDGAR submissions                        US filings; SEC asks for a contact email in the User-Agent
   nasdaq      Nasdaq earnings calendar                     who reports on which day, consensus EPS
+  treasury    U.S. Treasury daily par yield curve (CSV)    official end-of-day curve, a day ahead of FRED
+  cnbc        CNBC quote service (unofficial JSON)         government bond yields around the clock (2y/10y/30y ...)
 """
 from __future__ import annotations
 
@@ -43,6 +45,128 @@ class Fred(Connector):
         if resp.status_code != 200:
             raise ConnectorError(f"FRED HTTP {resp.status_code}")
         return {"id": series_id, "points": parse_fred_csv(resp.text)}
+
+
+# ------------------------------------------------------------------ U.S. Treasury
+TREASURY_CSV = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all"
+TREASURY_TENORS = {"1 Mo": "1m", "3 Mo": "3m", "6 Mo": "6m", "1 Yr": "1y", "2 Yr": "2y", "3 Yr": "3y", "5 Yr": "5y",
+                   "7 Yr": "7y", "10 Yr": "10y", "20 Yr": "20y", "30 Yr": "30y"}
+
+
+class Treasury(Connector):
+    id = "treasury"
+    name = "U.S. Treasury yield curve"
+    tier = "free"
+    capabilities = ("curve",)
+    homepage = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates"
+    description = ("Official daily par yield curve, published after the US close the same day - FRED's DGS series repeat "
+                   "it one to two business days later. No key needed.")
+
+    async def test(self) -> dict:
+        c = await self.curve()
+        last = c["days"][-1]
+        return {"ok": True, "detail": f"{last['date']}: 10y = {last['yields'].get('10y')}%"}
+
+    async def curve(self, year: int | None = None) -> dict:
+        """{"days": [{"date": YYYY-MM-DD, "yields": {tenor: %}}], oldest first}; early January adds the year before.
+        Shared by the Macro curve and the rates-by-country table: one download per 30 minutes."""
+        cache = getattr(self.ctx, "cache", None)
+        if cache is None or year:
+            return await self._curve(year)
+        async def build():
+            return await self._curve(None)
+        data = await cache.get("treasury:curve", 1800, build)
+        if "error" in data:
+            raise ConnectorError(data["error"])
+        return data
+
+    async def _curve(self, year: int | None) -> dict:
+        today = dt.date.today()
+        years = [year] if year else ([today.year - 1, today.year] if today.month == 1 else [today.year])
+        days = []
+        for y in years:
+            resp = await self.ctx.http.get(TREASURY_CSV.format(year=y), params={"type": "daily_treasury_yield_curve",
+                                           "field_tdr_date_value": str(y), "page": "", "_format": "csv"},
+                                           headers=PLAIN_UA, timeout=30, follow_redirects=True)
+            if resp.status_code != 200:
+                raise ConnectorError(f"Treasury HTTP {resp.status_code}")
+            days += parse_treasury_csv(resp.text)
+        if not days:
+            raise ConnectorError("Treasury: empty yield curve file")
+        return {"days": sorted(days, key=lambda d: d["date"])}
+
+
+def parse_treasury_csv(text: str) -> list[dict]:
+    """Treasury par yield curve CSV (MM/DD/YYYY, one column per tenor) -> [{"date", "yields"}] (pure, tested)."""
+    out = []
+    for row in csv.DictReader(io.StringIO(text)):
+        try:
+            day = dt.datetime.strptime(row.get("Date", ""), "%m/%d/%Y").date().isoformat()
+        except ValueError:
+            continue
+        ylds = {}
+        for col, tenor in TREASURY_TENORS.items():
+            try:
+                ylds[tenor] = float(row.get(col) or "")
+            except ValueError:
+                continue
+        if ylds:
+            out.append({"date": day, "yields": ylds})
+    return out
+
+
+# ------------------------------------------------------------------ CNBC (bond yields around the clock)
+CNBC_URL = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+
+
+class Cnbc(Connector):
+    id = "cnbc"
+    name = "CNBC quotes (bond yields)"
+    tier = "free"
+    capabilities = ("yields",)
+    homepage = "https://www.cnbc.com/bonds/"
+    description = ("Government bond yields that trade around the clock (US 2y/5y/10y/30y, Bund, Gilt) - the Cboe yield "
+                   "indices on Yahoo only move during US hours. Unofficial JSON endpoint behind cnbc.com, no key; "
+                   "may change without notice.")
+
+    async def test(self) -> dict:
+        q = await self.quotes(["US10Y"])
+        return {"ok": bool(q), "detail": f"US 10y = {q['US10Y']['price']}%" if q else "no data"}
+
+    async def quotes(self, symbols: list[str]) -> dict:
+        resp = await self.ctx.http.get(CNBC_URL, params={"symbols": "|".join(symbols), "requestMethod": "itv", "noform": "1",
+                                                         "partnerId": "2", "fund": "1", "exthrs": "1", "output": "json"},
+                                       headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code != 200:
+            raise ConnectorError(f"CNBC HTTP {resp.status_code}")
+        return parse_cnbc(resp.json())
+
+
+def _cnbc_num(text) -> float | None:
+    try:
+        return float(str(text).replace("%", "").replace(",", "").replace("+", "").strip())
+    except ValueError:
+        return None
+
+
+def parse_cnbc(data: dict) -> dict:
+    """CNBC restQuote JSON -> {symbol: Quote}; yields in percent, change in percentage points (pure, tested)."""
+    rows = ((data or {}).get("FormattedQuoteResult") or {}).get("FormattedQuote") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out = {}
+    for q in rows:
+        price, prev = _cnbc_num(q.get("last")), _cnbc_num(q.get("previous_day_closing"))
+        if price is None:
+            continue
+        try:
+            ts = dt.datetime.strptime(q.get("last_time", ""), "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
+        except ValueError:
+            ts = None
+        change = price - prev if prev is not None else None
+        out[q["symbol"]] = {"symbol": q["symbol"], "name": q.get("name"), "price": price, "prev_close": prev, "change": change,
+                            "change_pct": change / prev * 100 if change is not None and prev else None, "time": ts}
+    return out
 
 
 def parse_fred_csv(text: str) -> list[tuple[str, float]]:

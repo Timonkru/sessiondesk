@@ -2,10 +2,13 @@
 // releases and headlines on one page.
 import { api } from "../lib/api.js";
 import { lineChart } from "../lib/chart.js";
-import { h, clear, table, section, num, pct, price, dir, sparkline, note, loading, errorBox, day, clock } from "../lib/ui.js";
+import { h, clear, table, section, num, pct, price, dir, sparkline, note, loading, errorBox, day, clock, stamp, asOf } from "../lib/ui.js";
 import { crumbs } from "../lib/stocktable.js";
 
 const MONITORS = [["oil", "Crude oil"], ["gas", "Natural gas & power"], ["gold", "Gold & precious metals"]];
+
+// what the date of a hub series means: EIA reports a week, ENTSOG a gas day (06:00-06:00 CET), power a delivery day
+const periodLabel = (id) => (/^eia/.test(id) ? "week ending " : /^entsog/.test(id) ? "gas day " : /^power/.test(id) ? "delivery " : "");
 
 export async function render(root, params, ctx) {
   const key = MONITORS.some(([k]) => k === params[0]) ? params[0] : "oil";
@@ -16,13 +19,16 @@ export async function render(root, params, ctx) {
     const d = await api("/api/monitor/" + key, { fresh: true });
     if (d.error) { clear(body, errorBox(d.error)); return; }
     const prices = section("Prices", table([
-      { label: "", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label) },
+      { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol), title: r.exchange || "" }, r.label),
+        r.contract ? h("div", { class: "muted small" }, `${r.contract} contract, expires ${r.expiry}`) : null] },
       { label: "Last", num: true, render: (r) => price(r.price) },
+      { label: "Unit", render: (r) => h("span", { class: "muted small" }, r.unit || "") },
       { label: "Today", num: true, cls: (r) => dir(r.change_pct), render: (r) => pct(r.change_pct) },
+      { label: "Last trade", render: (r) => h("span", { class: "muted small" + (r.time && Date.now() / 1000 - r.time > 3 * 3600 ? " warn" : "") }, r.time ? stamp(r.time) : (r.source || "")) },
       { label: "", num: true, render: (r) => sparkline(r.spark, { ref: r.prev_close, width: 90 }) }], d.prices),
       d.spreads.length ? table([{ label: "Spread", render: (s) => s.name }, { label: "", num: true, render: (s) => num(s.value, 2) }], d.spreads) : null);
     const curves = section("Futures curve", d.curves.length ? d.curves.map((c) => h("div", null,
-      h("p", { class: "small" }, h("strong", null, c.name), c.shape ? ` · ${c.shape.state}: 2nd month ${pct(c.shape.m2, 1)}, 6th ${pct(c.shape.m6, 1)}${c.shape.m12 != null ? `, 12th ${pct(c.shape.m12, 1)}` : ""} vs front` : " · no contract prices"),
+      h("p", { class: "small" }, h("strong", null, c.name), c.shape ? ` · ${c.shape.state}: 2nd month ${pct(c.shape.m2, 1)}, 6th ${pct(c.shape.m6, 1)}${c.shape.m12 != null ? `, 12th ${pct(c.shape.m12, 1)}` : ""} vs front${c.shape.months_priced < c.shape.months ? ` (prices for ${c.shape.months_priced} of ${c.shape.months} months)` : ""}` : " · no contract prices"),
       c.points.length > 1 ? lineChart(c.points.map(([x, y]) => ({ x, y })), { height: 130, area: false, fmtY: (v) => price(v), fmtX: (x) => x }) : null)) : note("No curve."));
     const hub = section("Inventories, flows and drivers", table([
       { label: "", render: (r) => h("a", { href: "#/hub/" + encodeURIComponent(r.id) }, r.name) },
@@ -30,7 +36,7 @@ export async function render(root, params, ctx) {
       { label: "Change", num: true, cls: (r) => dir(r.change), render: (r) => (r.change == null ? "–" : (r.change > 0 ? "+" : "") + num(r.change, Math.abs(r.change) < 10 ? 2 : 1)) },
       { label: "vs a year ago", num: true, cls: (r) => dir(r.vs_year), render: (r) => (r.vs_year == null ? "–" : (r.vs_year > 0 ? "+" : "") + num(r.vs_year, Math.abs(r.vs_year) < 10 ? 2 : 0)) },
       { label: "", num: true, render: (r) => sparkline(r.spark, { width: 80 }) },
-      { label: "Date", render: (r) => h("span", { class: "small muted" }, r.day) }], d.hub, { empty: "Not collected yet - Data hub → collect now." }));
+      { label: "Period", render: (r) => h("span", { class: "small muted" }, periodLabel(r.id) + r.day) }], d.hub, { empty: "Not collected yet - Data hub → collect now." }));
     const side = [
       d.iv ? section("Implied volatility", h("p", null, `${d.iv.id.replace("iv:", "")} 30-day IV: `, h("strong", null, num(d.iv.last, 1) + "%"),
         h("span", { class: "small muted" }, ` (record since ${d.iv.since}, ${d.iv.n} sessions)`))) : null,

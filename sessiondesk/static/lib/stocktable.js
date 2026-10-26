@@ -1,6 +1,6 @@
 // The one stock table of the Markets tree: the same columns, filters, presets, grouping and CSV on every level
 // (index members, a region, a sector, an industry, all stocks). Rows come from /api/stocks.
-import { h, clear, table, num, pct, price, big, dir, note } from "./ui.js";
+import { h, clear, table, num, pct, price, big, dir, note, asOf } from "./ui.js";
 
 const FILTERS = [["chg1d", "Today %"], ["chg5d", "5 days %"], ["chg20d", "20 days %"], ["chg60d", "60 days %"], ["from_high", "From 52w high %"],
   ["dist200", "From 200-day avg %"], ["rsi14", "RSI 14"], ["vol20", "Volatility 20d %"], ["pe_fwd", "Forward P/E"], ["div_yield", "Dividend yield %"]];
@@ -155,3 +155,9 @@ export function crumbs(items) {
 }
 
 export function stockNote(text) { return note(text); }
+
+// When the list was computed (live prices) and how old the cached year of daily closes behind it is.
+export function listStamp(d) {
+  return h("p", { class: "small" }, asOf(d.asof, { label: "prices as of", maxAgeHours: 0.25 }), " · ",
+    asOf(d.closes_asof, { label: "daily history as of", maxAgeHours: 3, stale: d.closes_stale }));
+}

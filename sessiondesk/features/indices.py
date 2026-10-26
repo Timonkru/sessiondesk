@@ -288,22 +288,35 @@ async def member_closes(ctx, key: str) -> dict:
     yahoo = ctx.hub.get("yahoo")
 
     async def build_closes():
-        closes = await yahoo.daily_closes(members + [INDEX_SYMBOL[key]], "1y")
-        return {"closes": closes} if closes else {"error": "no member history"}
+        closes, last = await yahoo.daily_closes(members + [INDEX_SYMBOL[key]], "1y", with_time=True)
+        return {"closes": closes, "last_bar": last} if closes else {"error": "no member history"}
     data = await ctx.cache.get(f"idx:closes:{key}", 3600, build_closes, disk=True)
     if "error" in data:
         return data
     closes = {k: list(v) for k, v in data["closes"].items()}          # copy: the cached lists stay untouched
-    idx = closes.pop(INDEX_SYMBOL[key], [])
+    last_bar = data.get("last_bar") or {}
     from .markets import get_quotes
     live = await get_quotes(ctx, members + [INDEX_SYMBOL[key]], intraday=False)
     q = live.get("quotes", {})
     for sym in list(closes):
-        if sym in q and closes[sym] and q[sym].get("price") is not None:
-            closes[sym] = closes[sym][:-1] + [q[sym]["price"]]
-    if idx and INDEX_SYMBOL[key] in q and q[INDEX_SYMBOL[key]].get("price") is not None:
-        idx = idx[:-1] + [q[INDEX_SYMBOL[key]]["price"]]
-    return {"closes": closes, "index": idx}
+        closes[sym] = with_live(closes[sym], last_bar.get(sym), q.get(sym))
+    idx = closes.pop(INDEX_SYMBOL[key], [])
+    return {"closes": closes, "index": idx, "closes_asof": data.get("asof"), "closes_stale": bool(data.get("stale"))}
+
+
+NEW_SESSION_HOURS = 20
+
+
+def with_live(closes: list[float], last_bar_ts: float | None, quote: dict | None) -> list[float]:
+    """Daily closes with the live price as today's value (pure, tested). The live price replaces the last close
+    only when it belongs to the same session; a quote from a later session (the cached year ends yesterday)
+    is appended - replacing would compare today's price with the day before yesterday."""
+    if not closes or not quote or quote.get("price") is None:
+        return closes
+    t = quote.get("time")
+    if last_bar_ts and t and t - last_bar_ts > NEW_SESSION_HOURS * 3600:
+        return closes + [quote["price"]]
+    return closes[:-1] + [quote["price"]]
 
 
 async def index_view(ctx, key: str) -> dict:

@@ -1,7 +1,7 @@
 import { api } from "../lib/api.js";
 import { lineChart } from "../lib/chart.js";
 import { h, clear, table, section, num, pct, price, signed, dir, note, loading, errorBox, ago } from "../lib/ui.js";
-import { stockTable, crumbs } from "../lib/stocktable.js";
+import { stockTable, crumbs, listStamp } from "../lib/stocktable.js";
 
 // Indices: every index by region; an index with a bundled member list opens to its members (the shared stock
 // table) and to breadth, drivers and valuation computed from those members.
@@ -42,7 +42,7 @@ async function indexPage(root, u, tab, ctx) {
   if (tab === "breadth") return breadthTab(body, u.key, ctx);
   const d = await api(`/api/stocks?scope=${encodeURIComponent("index:" + u.key)}`, { ttl: 60000 });
   if (d.error) { clear(body, errorBox(d.error)); return; }
-  clear(body, stockTable(d.rows, { ctx, name: `${u.name} members`, group: "group", showIndices: false }), note(d.note));
+  clear(body, listStamp(d), stockTable(d.rows, { ctx, name: `${u.name} members`, group: "group", showIndices: false }), note(d.note));
 }
 
 async function breadthTab(body, key, ctx) {

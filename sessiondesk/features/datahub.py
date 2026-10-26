@@ -20,7 +20,7 @@ import re
 import statistics
 import time
 
-from . import assets, macro, markets
+from . import assets, futures, macro, markets
 from ..connectors.base import stable_id
 
 Z_WARN = 3.0
@@ -101,10 +101,15 @@ async def collect_markets(ctx) -> int:
     if not yahoo:
         return 0
     groups = ctx.settings.get("overview_groups") or markets.OVERVIEW
-    names = {s: (g, label) for g, items in groups for s, label in items}
+    # the board shows bond yields from CNBC; their daily history here stays the Cboe indices (^TNX ...) on Yahoo
+    names = {(markets.CNBC_YIELDS.get(s) if s in markets.CNBC_YIELDS else s): (g, label)
+             for g, items in groups for s, label in items}
+    names.pop(None, None)
     data = await yahoo.daily_series(list(names), "2y")
     for sym, pts in data.items():
         g, label = names[sym]
+        if sym in futures.CONTINUOUS:      # the board shows the exchange front contract; this history is Yahoo's roll
+            label += " - Yahoo continuous, jumps when Yahoo rolls"
         kind = "rate" if sym in RATES else "price"
         await ctx.db.run(ctx.db.upsert_series, _meta(f"mkt:{sym}", label, g, "Yahoo (daily close, today live)", kind,
                                                      "%" if kind == "rate" else ""), pts)

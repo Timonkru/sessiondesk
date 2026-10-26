@@ -32,10 +32,28 @@ def ff_contracts(today: dt.date, n: int = 10) -> list[tuple[str, str]]:
 async def rates(ctx) -> dict:
     fred = ctx.hub.get("fred")
 
+    treasury = ctx.hub.get("treasury")
+
     async def build():
         ids = [s for _, s in CURVE + EXTRA_SERIES]
         res = await asyncio.gather(*(fred.series(i) for i in ids), return_exceptions=True)
         series = {i: r["points"] for i, r in zip(ids, res) if not isinstance(r, Exception) and r.get("points")}
+        source = "FRED (daily, previous close)"
+        # The Treasury publishes the curve after the US close the same day; FRED's DGS copies arrive 1-2 business
+        # days later (26.10.2026: Treasury had 23.10., FRED stopped at 22.10.). Use it where it is newer.
+        try:
+            days = (await treasury.curve())["days"] if treasury and treasury.active() else []
+        except Exception:
+            days = []
+        if days:
+            sid_of = dict(CURVE)
+            fred_last = max((series[sid_of[t]][-1][0] for t in sid_of if sid_of[t] in series), default="")
+            if days[-1]["date"] >= fred_last:
+                for tenor, sid in CURVE:
+                    pts = [(d["date"], d["yields"][tenor]) for d in days if tenor in d["yields"]]
+                    if pts:
+                        series[sid] = pts
+                source = "U.S. Treasury daily par yield curve (end of day; FRED for the other series)"
         if not series:
             return {"error": "FRED returned no data"}
 
@@ -54,8 +72,26 @@ async def rates(ctx) -> dict:
                 extras.append({"label": label, "id": sid, "date": now[0], "value": now[1], "chg_1w": now[1] - wk[1] if wk else None})
         by = {c["tenor"]: c["yield"] for c in curve}
         spreads = {f"{a}/{b}": (by[b] - by[a]) * 100 for a, b in (("3m", "10y"), ("2y", "10y"), ("5y", "30y")) if a in by and b in by}
-        return {"curve": curve, "extras": extras, "spreads_bp": spreads, "source": "FRED (daily, previous close)"}
-    return await ctx.cache.get("macro:rates", 3600, build, disk=True)
+        return {"curve": curve, "extras": extras, "spreads_bp": spreads, "source": source}
+    out = dict(await ctx.cache.get("macro:rates:v2", 1800, build, disk=True))
+    if "error" in out:
+        return out
+    # today's level from the around-the-clock quotes, next to the official close
+    from .markets import yield_quotes
+    live_sym = {"3m": "US3M", "2y": "US2Y", "5y": "US5Y", "10y": "US10Y", "30y": "US30Y"}
+    try:
+        live = await yield_quotes(ctx, list(live_sym.values()))
+    except Exception:
+        live = {}
+    curve = []
+    for c in out.get("curve", []):
+        q = live.get(live_sym.get(c["tenor"], ""))
+        curve.append({**c, **({"now": q["price"], "now_time": q.get("time"), "now_source": q.get("source"),
+                               # change against CNBC's own previous close: par curve and on-the-run yields differ by ~1 bp
+                               "now_chg_bp": (q["price"] - q["prev_close"]) * 100 if q.get("prev_close") is not None else None}
+                            if q else {})})
+    out["curve"] = curve
+    return out
 
 
 async def fed_path(ctx) -> dict:
@@ -148,6 +184,18 @@ CREDIT = [("High-yield spread (OAS), %", "BAMLH0A0HYM2", "level"), ("Investment-
           ("Fed balance sheet, $ bn", "WALCL", "mn_to_bn"), ("Overnight reverse repo, $ bn", "RRPONTSYD", "level"),
           ("Treasury General Account, $ bn", "WTREGEN", "mn_to_bn")]
 EURO_10Y = [("Germany", "IRLTLT01DEM156N"), ("France", "IRLTLT01FRM156N"), ("Italy", "IRLTLT01ITM156N")]
+EURO_LIVE = [("Germany", "DE10Y-DE"), ("France", "FR10Y-FR"), ("Italy", "IT10Y-IT"), ("Spain", "ES10Y-ES")]
+# Normal age of the latest FRED observation in days (period date -> today, incl. the publication lag). Older = "late":
+# the source has not published the next value yet, or SessionDesk did not get it - the page marks it.
+EXPECTED_AGE_DAYS = {"BAMLH0A0HYM2": 5, "BAMLC0A0CM": 5, "RRPONTSYD": 5, "NFCI": 14, "WALCL": 10, "WTREGEN": 10,
+                     "ICSA": 14, "UNRATE": 70, "PAYEMS": 70, "CPIAUCSL": 80, "CPILFESL": 80, "RSAFS": 80,
+                     "PCEPILFE": 100, "GDPNOW": 135}
+
+
+def late(sid: str, date: str, today: dt.date | None = None) -> tuple[int, bool]:
+    """(age in days, older than normal for this series) (pure, tested)."""
+    age = ((today or dt.date.today()) - dt.date.fromisoformat(date)).days
+    return age, age > EXPECTED_AGE_DAYS.get(sid, 10 ** 6)
 
 
 def transform(points: list[tuple[str, float]], how: str) -> dict | None:
@@ -184,7 +232,8 @@ async def _fred_block(ctx, key: str, spec: list[tuple[str, str, str]], ttl: floa
         for (label, sid, how), r in zip(spec, res):
             t = transform(r["points"], how) if not isinstance(r, Exception) and r.get("points") else None
             if t:
-                rows.append({"label": label, "id": sid, **t})
+                age, is_late = late(sid, t["date"])
+                rows.append({"label": label, "id": sid, **t, "age_days": age, "late": is_late})
             else:
                 missing.append(sid)
         return {"rows": rows, "missing": missing, "source": source} if rows else {"error": "FRED returned no data"}
@@ -212,8 +261,25 @@ async def credit(ctx) -> dict:
                          "spread_bp": (y - de[d]) * 100 if d in de else None})
         return {"rows": rows,
                 "note": "Monthly averages of 10-year government bond yields (OECD via FRED) - the level of the spread, "
-                        "not today's move. Daily spreads need a paid source."}
+                        "not today's move (today's spreads are in the table above)."}
     out["euro"] = await ctx.cache.get("macro:euro10y", 12 * 3600, build_euro, disk=True)
+    # today's 10-year yields and spreads to the Bund (CNBC); the monthly OECD averages above lag one to two months
+    from .markets import yield_quotes
+    try:
+        live = await yield_quotes(ctx, [s for _, s in EURO_LIVE])
+    except Exception:
+        live = {}
+    de = (live.get("DE10Y-DE") or {}).get("price")
+    rows = []
+    for country, sym in EURO_LIVE:
+        q = live.get(sym)
+        if q:
+            prev_de = (live.get("DE10Y-DE") or {}).get("prev_close")
+            spread = (q["price"] - de) * 100 if de is not None else None
+            prev = (q["prev_close"] - prev_de) * 100 if q.get("prev_close") is not None and prev_de is not None else None
+            rows.append({"country": country, "yield": q["price"], "spread_bp": spread,
+                         "spread_chg_bp": spread - prev if spread is not None and prev is not None else None, "time": q.get("time")})
+    out["euro_live"] = {"rows": rows, "source": "CNBC (benchmark 10-year bonds, live)"} if rows else {"error": "no live euro yields"}
     return out
 
 

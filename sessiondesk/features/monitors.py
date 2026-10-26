@@ -10,6 +10,9 @@ import datetime as dt
 import re
 import time
 
+from . import futures
+from .futures import ttf_in_usd_mmbtu
+
 MONTH_CODES = "FGHJKMNQUVXZ"
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -63,14 +66,19 @@ def contracts(root: str, suffix: str, today: dt.date, offset: int, roll_day: int
     return out
 
 
-def curve_shape(points: list[tuple[str, float]]) -> dict | None:
-    """Front vs. later contracts in percent: negative = backwardation (later cheaper) (pure, tested)."""
-    vals = [v for _, v in points if v]
-    if len(vals) < 2:
+def curve_shape(points: list[tuple[str, float | None]]) -> dict | None:
+    """Front vs. later contracts in percent: negative = backwardation (later cheaper) (pure, tested).
+    Months without a price stay in the list as None, so "6th month" is the 6th contract month, not the 6th price
+    Yahoo happened to have (TTF on Yahoo misses most months)."""
+    if not points or not points[0][1]:
         return None
-    front = vals[0]
-    at = lambda i: (vals[i] / front - 1) * 100 if len(vals) > i else None   # noqa: E731
-    return {"front": front, "m2": at(1), "m6": at(5), "m12": at(11), "state": "backwardation" if vals[-1] < front else "contango"}
+    front = points[0][1]
+    if sum(1 for _, v in points if v) < 2:
+        return None
+    at = lambda i: (points[i][1] / front - 1) * 100 if len(points) > i and points[i][1] else None   # noqa: E731
+    last = [v for _, v in points if v][-1]
+    return {"front": front, "m2": at(1), "m6": at(5), "m12": at(11), "state": "backwardation" if last < front else "contango",
+            "months_priced": sum(1 for _, v in points if v), "months": len(points)}
 
 
 def spreads(keys: list[str], q: dict) -> list[dict]:
@@ -81,8 +89,12 @@ def spreads(keys: list[str], q: dict) -> list[dict]:
             out.append({"name": "Brent minus WTI ($/bbl)", "value": p("BZ=F") - p("CL=F")})
         if k == "crack_321" and p("RB=F") and p("HO=F") and p("CL=F"):
             out.append({"name": "3-2-1 crack spread ($/bbl, refining margin)", "value": (2 * p("RB=F") * 42 + p("HO=F") * 42 - 3 * p("CL=F")) / 3})
-        if k == "ttf_hh" and p("TTF=F") and p("NG=F"):
-            out.append({"name": "TTF (EUR/MWh) / Henry Hub ($/MMBtu) - price ratio", "value": p("TTF=F") / p("NG=F")})
+        if k == "ttf_hh" and p("TTF=F") and p("NG=F") and p("EURUSD=X"):
+            # one unit first: TTF EUR/MWh -> $/MMBtu (the old ratio divided EUR/MWh by $/MMBtu, a number without meaning)
+            ttf_usd = ttf_in_usd_mmbtu(p("TTF=F"), p("EURUSD=X"))
+            out.append({"name": "TTF converted to $/MMBtu (EUR/MWh x EUR/USD / 3.412)", "value": ttf_usd})
+            out.append({"name": "TTF minus Henry Hub ($/MMBtu, front contracts)", "value": ttf_usd - p("NG=F")})
+            out.append({"name": "TTF / Henry Hub (both in $/MMBtu)", "value": ttf_usd / p("NG=F")})
         if k == "gold_silver" and p("GC=F") and p("SI=F"):
             out.append({"name": "Gold / silver ratio", "value": p("GC=F") / p("SI=F")})
     return out
@@ -108,7 +120,11 @@ async def monitor(ctx, key: str) -> dict:
     from .markets import get_quotes
     yahoo = ctx.hub.get("yahoo")
     today = dt.date.today()
-    curve_syms = {c[5]: contracts(c[0], c[1], today, c[2], c[3], c[4], 12 if c[4] is None else 6) for c in spec["curves"]}
+    curve_syms = {c[5]: ([(m["symbol"], m["label"]) for m in futures.months(c[0], today, 12)] if c[0] in futures.CONTRACTS
+                         else contracts(c[0], c[1], today, c[2], c[3], c[4], 12 if c[4] is None else 6)) for c in spec["curves"]}
+    # energy: name the exchange's front contract instead of Yahoo's continuous symbol (futures.py), keep the key for spreads
+    fronts = {s: futures.front(s, today) for s, _ in spec["prices"]}
+    fetch = [(fronts[s]["symbol"] if fronts[s] else s) for s, _ in spec["prices"]] + (["EURUSD=X"] if "ttf_hh" in spec["spreads"] else [])
 
     async def curve_data():
         syms = [s for lst in curve_syms.values() for s, _ in lst]
@@ -116,8 +132,7 @@ async def monitor(ctx, key: str) -> dict:
         out = []
         for name, lst in curve_syms.items():
             pts = [(label, (data.get(s) or [[None, None]])[-1][1]) for s, label in lst]
-            pts = [(lb, v) for lb, v in pts if v]
-            out.append({"name": name, "points": pts, "shape": curve_shape(pts)})
+            out.append({"name": name, "points": [(lb, v) for lb, v in pts if v], "shape": curve_shape(pts)})
         return {"curves": out}
 
     async def hub_rows():
@@ -163,12 +178,16 @@ async def monitor(ctx, key: str) -> dict:
         d = await view(ctx)
         return d if d.get("configured") else None
 
-    res = await asyncio.gather(get_quotes(ctx, [s for s, _ in spec["prices"]], intraday=True), curve_data(), hub_rows(),
+    res = await asyncio.gather(get_quotes(ctx, fetch, intraday=True), curve_data(), hub_rows(),
                                headlines(), releases(), positioning(), tankers(), return_exceptions=True)
     ok = lambda x, d: d if isinstance(x, Exception) else x   # noqa: E731
     q, curves, hub, news, cal, cot_rows, tank = (ok(res[0], {}), ok(res[1], {"curves": []}), ok(res[2], []), ok(res[3], []),
                                                  ok(res[4], []), ok(res[5], []), ok(res[6], None))
     quotes = dict(q.get("quotes", {}))
+    for s, fr in fronts.items():                    # the contract's quote under the key the spreads use
+        if fr and fr["symbol"] in quotes:
+            quotes[s] = {**quotes[fr["symbol"]], "contract": fr["label"], "expiry": fr["expiry"], "unit": fr["unit"],
+                         "exchange": fr["contract"], "symbol": fr["symbol"]}
     missing = [s for s, _ in spec["prices"] if (quotes.get(s) or {}).get("price") is None]
     if missing:                                     # e.g. TTF=F has no intraday quote: fall back to the daily closes
         daily = await yahoo.daily_series(missing, "1mo")
@@ -180,6 +199,7 @@ async def monitor(ctx, key: str) -> dict:
     iv_pts = await ctx.db.run(ctx.db.observations, spec["iv"], 400) if spec["iv"] else []
     return {"key": key, "name": spec["name"],
             "prices": [{"symbol": s, "label": lb, **(quotes.get(s) or {})} for s, lb in spec["prices"]],
+            "asof": time.time(),
             "curves": curves["curves"], "spreads": spreads(spec["spreads"], quotes), "hub": hub, "news": news, "calendar": cal,
             "cot": cot_rows, "tankers": tank,
             "iv": {"id": spec["iv"], "last": iv_pts[-1][1], "n": len(iv_pts), "since": iv_pts[0][0]} if iv_pts else None,

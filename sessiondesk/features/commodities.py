@@ -4,8 +4,10 @@ GIE AGSI+ with the user's free key), plus the sources that can be connected for 
 """
 from __future__ import annotations
 
+import datetime as dt
 import time
 
+from . import futures
 from .datahub import AGSI_CATEGORY, AGSI_SCOPES, ENTSOG_CATEGORY, ENTSOG_LNG, ENTSOG_ROUTES, source_url
 from .sectors import returns
 
@@ -16,6 +18,10 @@ GROUPS = [
     ("Agriculture", [("ZC=F", "Corn"), ("ZW=F", "Wheat"), ("ZS=F", "Soybeans"), ("KC=F", "Coffee"), ("CC=F", "Cocoa"), ("SB=F", "Sugar"),
                      ("CT=F", "Cotton"), ("OJ=F", "Orange juice"), ("LE=F", "Live cattle"), ("HE=F", "Lean hogs")]),
 ]
+UNITS = {"CL=F": "$/bbl", "BZ=F": "$/bbl", "NG=F": "$/MMBtu", "TTF=F": "EUR/MWh", "RB=F": "$/gal", "HO=F": "$/gal", "URA": "$",
+         "GC=F": "$/oz", "SI=F": "$/oz", "PL=F": "$/oz", "PA=F": "$/oz", "HG=F": "$/lb", "ALI=F": "$/t", "ZC=F": "¢/bu",
+         "ZW=F": "¢/bu", "ZS=F": "¢/bu", "KC=F": "¢/lb", "CC=F": "$/t", "SB=F": "¢/lb", "CT=F": "¢/lb", "OJ=F": "¢/lb",
+         "LE=F": "¢/lb", "HE=F": "¢/lb"}
 FUNDAMENTAL_CATEGORIES = ("Oil (EIA weekly)", "Gas (EIA weekly)")
 POWER_CATEGORY = "Power (day-ahead)"
 # display order of the ENTSOG table: total, pipeline routes, LNG total, LNG by country
@@ -45,19 +51,31 @@ async def board(ctx) -> dict:
     yahoo = ctx.hub.get("yahoo")
 
     async def build():
-        syms = [s for _, items in GROUPS for s, _ in items]
-        data = await yahoo.daily_series(syms, "2y")
+        # energy: the exchange's front contract, not Yahoo's continuous symbol (it rolls early - futures.py)
+        resolved = {s: futures.front(s) for _, items in GROUPS for s, _ in items}
+        syms = [(r["symbol"] if r else s) for s, r in resolved.items()]
+        nxt = {s: futures.months(r["root"], dt.date.today(), 2)[1] for s, r in resolved.items() if r}
+        data = await yahoo.daily_series(syms + [n["symbol"] for n in nxt.values()], "2y")
         out = []
         for g, items in GROUPS:
             rows = []
             for sym, name in items:
-                pts = data.get(sym)
+                fr = resolved.get(sym)
+                ysym = fr["symbol"] if fr else sym
+                pts = data.get(ysym)
                 if pts:
-                    rows.append({"symbol": sym, "name": name, "last": pts[-1][1], "day": pts[-1][0], **returns(pts),
-                                 "spark": [v for _, v in pts[-60:]]})
+                    row = {"symbol": ysym, "name": name, "last": pts[-1][1], "day": pts[-1][0], **returns(pts),
+                           "unit": UNITS.get(sym, ""), "spark": [v for _, v in pts[-60:]]}
+                    if fr:
+                        n = nxt[sym]
+                        row.update({"contract": f"{fr['label']} (expires {fr['expiry']})", "exchange": fr["contract"],
+                                    "next": {"label": n["label"], "symbol": n["symbol"], "last": (data.get(n["symbol"]) or [[None, None]])[-1][1]}})
+                    else:
+                        row["contract"] = "continuous front month (Yahoo)" if sym.endswith("=F") else ""
+                    rows.append(row)
             out.append({"group": g, "rows": rows})
         return {"groups": out, "asof": time.time()}
-    prices = await ctx.cache.get("commodities:board", 900, build)
+    prices = await ctx.cache.get("commodities:board:v2", 900, build)
     fundamentals, power, flows = [], [], []
     storage: dict[str, dict] = {}
     for s in await ctx.db.run(ctx.db.series_list):
@@ -104,5 +122,7 @@ async def board(ctx) -> dict:
                   "verified": bool(agsi and agsi.verified)}
     return {**prices, "fundamentals": fundamentals, "power": power, "gas_flows": flows, "gas_storage": gas_storage, "agsi": agsi_state,
             "more_sources": [{"name": n, "access": a, "what": w} for n, a, w in MORE_SOURCES],
-            "note": "Front-month futures (rolling contracts jump at expiry) and one uranium ETF, free daily closes. Inventories from the "
-                    "EIA weekly reports; their history in SessionDesk starts with the first collection."}
+            "note": "Futures: energy (Henry Hub, TTF, Brent, WTI, RBOB, ULSD) as the exchange's front contract by its expiry rule, the others as Yahoo's "
+                    "continuous front month, which jumps when Yahoo rolls it. Prices delayed, returns from daily closes of that contract. "
+                    "Henry Hub is quoted in $/MMBtu, TTF in EUR/MWh - 1 MWh = 3.412 MMBtu, so the two prices are not comparable "
+                    "without converting (see the gas monitor). Inventories from the EIA weekly reports (date = week ending)."}

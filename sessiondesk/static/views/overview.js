@@ -2,11 +2,12 @@
 // volatility), your watchlist, the live squawk. Every index by region lives on Indices, the sectors on Sectors, so
 // this page does not repeat them. Releases live in the Calendar, unusual moves on the Movers page.
 import { api, on } from "../lib/api.js";
-import { h, clear, table, section, sparkline, price, pct, signed, dir, ago, clock, note, loading, errorBox } from "../lib/ui.js";
+import { h, clear, table, section, sparkline, price, pct, signed, dir, ago, clock, asOf, note, loading, errorBox } from "../lib/ui.js";
 import { watchlist } from "../lib/watchlist.js";
 
 const REGIONS = ["Americas", "Europe", "Asia-Pacific", "Middle East & Africa"];
-const KEY_INDICES = ["^GSPC", "^NDX", "^DJI", "^RUT", "^GDAXI", "^STOXX50E", "^FTSE", "^N225", "^HSI", "000001.SS"];
+// the European cash indices a European desk trades all on the first screen (DAX, Euro Stoxx 50, Stoxx 600, FTSE, CAC, SMI)
+const KEY_INDICES = ["^GSPC", "^NDX", "^DJI", "^RUT", "^GDAXI", "^STOXX50E", "^STOXX", "^FTSE", "^FCHI", "^SSMI", "^N225", "^HSI", "000001.SS"];
 const ELSEWHERE = { "US sectors": "#/sectors" };          // full lists with their own page: a link, not a second table
 
 export async function render(root, _params, ctx) {
@@ -32,17 +33,18 @@ export async function render(root, _params, ctx) {
       const isRates = g.title === "Rates";
       left.appendChild(section(g.title, g.more ? h("p", { class: "small", style: { margin: "-4px 0 4px" } }, h("a", { href: g.more[1] }, g.more[0] + " →"), " · ",
         h("a", { href: "#/sectors" }, "sectors →"), " · ", h("a", { href: "#/stocks" }, "stocks →")) : null, table([
-        { label: "", render: (r) => [h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.label),
+        { label: "", render: (r) => [r.chart === null ? h("span", null, r.label) : h("a", { href: "#/stock/" + encodeURIComponent(r.chart || r.symbol) }, r.label),
           withMembers[r.symbol] ? h("a", { class: "small muted", style: { marginLeft: "6px" }, href: "#/indices/" + withMembers[r.symbol], title: "members, breadth, drivers, valuation" }, "members ›") : null] },
         { label: "Last", num: true, render: (r) => isRates ? (r.price != null ? r.price.toFixed(3) + "%" : "–") : price(r.price) },
         { label: isRates ? "Δ bp" : "Δ %", num: true, cls: (r) => dir(r.change_pct),
           render: (r) => isRates ? signed(r.change_bp, 1) : pct(r.change_pct) },
         { label: "Today", num: true, render: (r) => sparkline(r.spark, { ref: r.prev_close }) },
-        { label: "", num: true, render: (r) => h("span", { class: "muted small" }, r.time ? ago(r.time) : "") },
+        { label: "", num: true, render: (r) => h("span", { class: "muted small" + (isRates && r.source && r.source !== "cnbc" ? " warn" : ""),
+          title: r.time ? `last trade ${new Date(r.time * 1000).toLocaleString()} · ${r.source || ""}` : "" }, r.time ? ago(r.time) : "") },
       ], g.rows)));
     }
-    meta.textContent =
-      `Yahoo quotes, delayed per exchange rules · updated ${clock(d.asof)}` + (d.missing && d.missing.length ? ` · no data: ${d.missing.join(", ")}` : "");
+    clear(meta, `Yahoo quotes, delayed per exchange rules; bond yields CNBC (around the clock) · `, asOf(d.asof, { label: "updated", maxAgeHours: 0.1 }),
+      d.missing && d.missing.length ? ` · no data: ${d.missing.join(", ")}` : "");
     facts.groups = groups.map((g) => ({ group: g.title, rows: g.rows.map((r) => ({ name: r.label, symbol: r.symbol, last: r.price, change_pct: r.change_pct, change_bp: r.change_bp })) }));
     push();
   };

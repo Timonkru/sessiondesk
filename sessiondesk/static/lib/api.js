@@ -22,7 +22,8 @@ export async function api(path, { method = "GET", body, fresh = false, ttl = 0 }
     const last = Number(sessionStorage.getItem("sd.reloaded") || 0);
     if (Date.now() - last > 15000) { sessionStorage.setItem("sd.reloaded", String(Date.now())); location.reload(); }
   }
-  if (method === "GET" && ttl > 0 && !data.error) memo.set(key, { t: Date.now(), v: data });
+  // a value the server is still rebuilding is not kept: the next visit asks again instead of showing it for `ttl` more
+  if (method === "GET" && ttl > 0 && !data.error && !data.refreshing && !data.stale) memo.set(key, { t: Date.now(), v: data });
   return data;
 }
 

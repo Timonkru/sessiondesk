@@ -7,6 +7,9 @@ is the member file's sub-industry where it has one (S&P 500, Nasdaq-100, CAC 40)
 """
 from __future__ import annotations
 
+import asyncio
+import time
+
 from . import universe
 from .screener import screen
 from .sectors import canonical_sector
@@ -51,20 +54,23 @@ def merge(per_universe: dict[str, list[dict]]) -> list[dict]:
 
 async def stocks(ctx, scope: str = "all", group: str | None = None, industry: str | None = None) -> dict:
     label, keys = scope_universes(scope)
-    per, notes = {}, []
-    for k in keys:
-        d = await screen(ctx, k)
+    per, notes, built = {}, [], []
+    results = await asyncio.gather(*(screen(ctx, k) for k in keys))      # in parallel: a cold start rebuilds each list
+    for k, d in zip(keys, results):
         if "error" in d:
             notes.append(f"{universe.UNIVERSES[k]}: {d['error']}")
             continue
         per[k] = d["rows"]
+        built.append((d.get("closes_asof"), d.get("closes_stale")))
     rows = merge(per)
     if group:
         rows = [r for r in rows if r["group"] == group]
     if industry:
         rows = [r for r in rows if r["industry"] == industry]
     with_profile = sum(1 for r in rows if r.get("market_cap") is not None)
-    return {"scope": scope, "label": label, "universes": keys, "rows": rows, "n": len(rows),
+    stamps = [t for t, _ in built if t]
+    return {"scope": scope, "label": label, "universes": keys, "rows": rows, "n": len(rows), "asof": time.time(),
+            "closes_asof": min(stamps) if stamps else None, "closes_stale": any(st for _, st in built),
             "groups": [{"key": k, "label": v} for k, v in GROUP_LABELS.items()],
             "note": ("Members of the bundled index lists; a stock in several indices appears once. Moves from one year of daily "
                      f"closes, today's value live. Market cap, forward P/E and yield only where a profile is cached ({with_profile} "

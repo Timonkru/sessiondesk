@@ -31,9 +31,10 @@ class _Yahoo:
     def __init__(self):
         self.calls = 0
 
-    async def daily_closes(self, symbols, range_):
+    async def daily_closes(self, symbols, range_, with_time=False):
         self.calls += 1
-        return {s: [100.0 + i for i in range(260)] for s in symbols}
+        closes = {s: [100.0 + i for i in range(260)] for s in symbols}
+        return (closes, {s: 1_700_000_000 for s in symbols}) if with_time else closes
 
 
 def _ctx(tmp_path):
@@ -67,3 +68,13 @@ def test_universes_endpoint_and_scan_selection(client):
     assert "error" in client.put("/api/universes/scan", json={"keys": ["nope"]}).json()
     assert client.put("/api/universes/scan", json={"keys": ["ftse100", "dax40"]}).json()["scan"] == ["ftse100", "dax40"]
     assert client.get("/api/settings").json()["settings"]["universes"] == ["ftse100", "dax40"]
+
+
+def test_live_price_replaces_the_same_session_and_appends_a_new_one():
+    closes, bar = [100.0, 101.0, 102.0], 1_793_000_000                 # last bar: a session that opened at `bar`
+    same = indices.with_live(closes, bar, {"price": 103.0, "time": bar + 5 * 3600})
+    assert same == [100.0, 101.0, 103.0]                                 # still that session: today's value updated
+    later = indices.with_live(closes, bar, {"price": 99.0, "time": bar + 72 * 3600})
+    assert later == [100.0, 101.0, 102.0, 99.0]                          # Monday quote on Friday's year: appended
+    assert indices.with_live(closes, None, {"price": 99.0, "time": bar}) == [100.0, 101.0, 99.0]   # old cache: as before
+    assert indices.with_live(closes, bar, None) == closes

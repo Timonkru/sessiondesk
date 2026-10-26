@@ -10,7 +10,7 @@ sessiondesk/app.py  FastAPI: routes, security guard, background loops
    |     markets  stocks  deep  valuation  movers  news  calendar  flows  research  macro  broker  jobs
    |     today  levels  risk  journal  indices  assets  universe  feeds  system
    +-- connectors/ one class per outside system, normalized shapes (see base.py)
-   |     yahoo  rss  public (fred, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
+   |     yahoo  rss  public (fred, treasury, cnbc, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
    |     alphavantage, tradingeconomics, alpaca)  registry.py (the list + planned entries)
    +-- ai/         providers.py (Anthropic SDK, OpenAI-compatible, Gemini, Ollama) + assist.py (rules, prompts)
    +-- push.py     phone push (ntfy / own Telegram bot): broker listener -> queue -> sender, off by default

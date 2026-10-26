@@ -143,6 +143,17 @@ async def _earnings_recent(ctx) -> dict[str, str]:
     return out
 
 
+def traded_today(quote_time: float | None, now: float | None = None) -> bool:
+    """Quote from today's session (pure, tested)? Before the US open, US stocks still show Friday's / yesterday's
+    move: that is the last session, not a move happening now. "Today" starts 03:00 UTC before midnight so Sydney
+    and Tokyo sessions count as the day they trade."""
+    if not quote_time:
+        return True
+    now = now or time.time()
+    start = dt.datetime.fromtimestamp(now, dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() - 3 * 3600
+    return quote_time >= start
+
+
 async def scan(ctx, *, publish: bool = True) -> dict:
     rules = ctx.settings.get("alerts") or {}
     watch = [s.strip() for s in ctx.settings.get("watchlist") or [] if s.strip()]
@@ -172,9 +183,11 @@ async def scan(ctx, *, publish: bool = True) -> dict:
         rows.append({"symbol": sym, "name": (m or {}).get("name", ""), "pct": pct, "z": z, "price": q.get("price"),
                      "time": q.get("time"), "universe": universe.UNIVERSES.get(u) if u else "watchlist",
                      "watch": sym in watch, "bench": bench_sym, "sector_etf": etf, "sector": (m or {}).get("sector")})
-    flagged = [r for r in rows if is_unusual(r["pct"], r["z"], rules, r["watch"])]
-    flagged.sort(key=lambda r: -abs(r["z"] if r["z"] is not None else r["pct"] / 2))
-    flagged = flagged[:25]
+    earlier = [r for r in rows if not traded_today(r.get("time"))]
+    rows = [r for r in rows if traded_today(r.get("time"))]
+    order = lambda r: -abs(r["z"] if r["z"] is not None else r["pct"] / 2)   # noqa: E731
+    flagged = sorted((r for r in rows if is_unusual(r["pct"], r["z"], rules, r["watch"])), key=order)[:25]
+    previous = sorted((r for r in earlier if is_unusual(r["pct"], r["z"], rules, r["watch"])), key=order)[:15]
     earnings = await _earnings_recent(ctx)
     names = {"^GSPC": "S&P 500", "^NDX": "Nasdaq 100", "^GDAXI": "DAX"}
 
@@ -216,6 +229,7 @@ async def scan(ctx, *, publish: bool = True) -> dict:
             if publish:
                 ctx.broker.publish("alert", {"alert": alert})
     top = sorted(rows, key=lambda r: r["pct"])
-    return {"flagged": flagged, "new": [a["id"] for a in new_alerts], "scanned": len(rows),
+    return {"flagged": flagged, "new": [a["id"] for a in new_alerts], "scanned": len(rows), "not_traded_today": len(earlier),
+            "previous_session": [{k: r[k] for k in ("symbol", "name", "pct", "z", "time", "universe")} for r in previous],
             "gainers": top[::-1][:15], "losers": top[:15], "asof": time.time(),
             "rules": rules, "universes": [universe.UNIVERSES[u] for u in unis]}
