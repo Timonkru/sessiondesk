@@ -284,6 +284,10 @@ class JobManager:
             return {"error": "unknown job"}
         if job.running or job.status == "running":
             return {"error": "already running"}
+        # claimed now, not when run() gets the loop: two start() calls before that (autostart plus the restart of a
+        # service whose saved status was "failed", or a double click) started the news watcher twice on 26.10.2026,
+        # both runs shared job.proc and SessionDesk lost track of the process that kept running
+        job.status = "running"
         task = asyncio.ensure_future(self.run(job))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
