@@ -77,3 +77,9 @@ def test_late_fred_observation():
     assert macro.late("BAMLH0A0HYM2", "2026-10-19", today) == (7, True)                  # daily spread a week old
     assert macro.late("CPIAUCSL", "2026-09-01", today)[1] is False                       # monthly: normal lag
     assert macro.late("UNKNOWN", "2020-01-01", today)[1] is False                        # no rule, no flag
+
+
+def test_no_early_warnings_on_rolling_continuous_futures():
+    from sessiondesk.features import datahub
+    assert not datahub.warns("mkt:NG=F") and not datahub.warns("mkt:BZ=F")     # roll steps, not market moves
+    assert datahub.warns("mkt:GC=F") and datahub.warns("mkt:^GDAXI")

@@ -393,13 +393,18 @@ ENTSOG_PAUSE = 4.0                                  # seconds between requests
 NO_WARN_PREFIX = ("entsog:",)
 NO_WARN_SUFFIX = (":injection", ":withdrawal")
 WARN_ANYWAY = {"entsog:total", "entsog:lng_total"}
+# Yahoo's continuous energy futures jump when Yahoo rolls to the next contract: 26.10.2026 "Natural gas +4.0 sigma"
+# was the step from the November to the December contract, while the board (front contract) showed gas -1.5 %.
+# The pre-session briefing reported that as contradicting gas data. No warnings on these series.
+NO_WARN_ROLLING = {"mkt:" + s for s in futures.CONTINUOUS}
 
 
 def warns(series_id: str) -> bool:
     """Does this series take part in the early warnings? (pure, tested)"""
     if series_id in WARN_ANYWAY:
         return True
-    return not (series_id.startswith(NO_WARN_PREFIX) or (series_id.startswith("agsi:") and series_id.endswith(NO_WARN_SUFFIX)))
+    return not (series_id.startswith(NO_WARN_PREFIX) or series_id in NO_WARN_ROLLING
+                or (series_id.startswith("agsi:") and series_id.endswith(NO_WARN_SUFFIX)))
 ENTSOG_CATEGORY = "Gas flows (ENTSOG)"
 
 

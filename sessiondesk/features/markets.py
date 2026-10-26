@@ -6,6 +6,8 @@ Every quote carries the connector it came from.
 """
 from __future__ import annotations
 
+from .movers import traded_today
+
 OVERVIEW: list[tuple[str, list[tuple[str, str]]]] = [
     ("Americas", [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^DJI", "Dow Jones"), ("^RUT", "Russell 2000"),
                   ("^GSPTSE", "Canada TSX"), ("XIU.TO", "Canada TSX 60 (XIU ETF)"), ("^MXX", "Mexico IPC"), ("^BVSP", "Brazil Bovespa"), ("^MERV", "Argentina Merval")]),
@@ -106,6 +108,8 @@ async def overview(ctx) -> dict:
             row = {"symbol": sym, "label": label, **(q or {}), "chart": CNBC_YIELDS.get(sym) or (None if sym in CNBC_YIELDS else sym)}
             if fr:
                 row.update({"symbol": fr["symbol"], "chart": fr["symbol"], "label": f"{label} {fr['label']}"})
+            if q:   # False = the last quote is from an earlier session (market not open yet, or the feed is still delayed)
+                row["traded_today"] = traded_today(q.get("time"))
             if sym in YIELD_SYMBOLS and q and q.get("change") is not None:
                 row["change_bp"] = q["change"] * 100          # yields: show the move in basis points
             rows.append(row)

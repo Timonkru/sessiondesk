@@ -295,16 +295,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
     # ------------------------------------------------------------------ movers & alerts
     @app.get("/api/movers")
     async def get_movers():
-        ctx = C()
-        last = ctx.cache.peek("movers:last")
-        every_s = max(60, (ctx.settings.get("alerts") or {}).get("scan_minutes", 5) * 60)
-        if last and (not market_hours() or time.time() - (last.get("asof") or 0) < 2 * every_s):
-            return last
-        # no scan yet, or the last one is older than two scan intervals while markets trade: scan now, do not
-        # hand out the old list as current
-        res = await movers.scan(ctx)
-        ctx.cache.invalidate("movers:last")
-        return await ctx.cache.get("movers:last", 10 ** 9, lambda_scan(ctx, res))
+        return await movers.latest(C())
 
     @app.post("/api/movers/scan")
     async def scan_now():
@@ -1046,9 +1037,7 @@ def lambda_scan(ctx, result: dict | None = None):
 
 
 # ---------------------------------------------------------------------- background loops
-def market_hours(now: float | None = None) -> bool:
-    t = dt.datetime.fromtimestamp(now or time.time(), dt.timezone.utc)
-    return t.weekday() < 5 and 7 <= t.hour < 21          # Europe open .. US close (UTC), broad on purpose
+market_hours = movers.market_hours
 
 
 async def _news_stream_loop(ctx):

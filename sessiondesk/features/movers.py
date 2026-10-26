@@ -233,3 +233,26 @@ async def scan(ctx, *, publish: bool = True) -> dict:
             "previous_session": [{k: r[k] for k in ("symbol", "name", "pct", "z", "time", "universe")} for r in previous],
             "gainers": top[::-1][:15], "losers": top[:15], "asof": time.time(),
             "rules": rules, "universes": [universe.UNIVERSES[u] for u in unis]}
+
+
+def market_hours(now: float | None = None) -> bool:
+    t = dt.datetime.fromtimestamp(now or time.time(), dt.timezone.utc)
+    return t.weekday() < 5 and 7 <= t.hour < 21          # Europe open .. US close (UTC), broad on purpose
+
+
+async def latest(ctx) -> dict:
+    """The last scan if it is recent, else a new one. Shared by the Movers page and the briefing: a scan older than
+    two scan intervals while markets trade is not handed out as current (26.10.2026 the briefing got a cached scan
+    "not necessarily from the current session" and listed it as a data gap)."""
+    last = ctx.cache.peek("movers:last")
+    every_s = max(60, (ctx.settings.get("alerts") or {}).get("scan_minutes", 5) * 60)
+    if last and (not market_hours() or time.time() - (last.get("asof") or 0) < 2 * every_s):
+        return last
+    res = await scan(ctx)
+    if "error" in res:
+        return last or res
+    ctx.cache.invalidate("movers:last")
+
+    async def keep():
+        return res
+    return await ctx.cache.get("movers:last", 10 ** 9, keep)
