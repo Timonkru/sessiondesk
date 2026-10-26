@@ -82,6 +82,7 @@ class Job:
     buffer: deque = field(default_factory=lambda: deque(maxlen=2000))
     proc: asyncio.subprocess.Process | None = None
     stop_requested: bool = False
+    restarts: int = 0                          # unexpected exits of an autostart service in a row
 
     @property
     def running(self) -> bool:
@@ -306,7 +307,7 @@ class JobManager:
         self._emit(job, f"--- {dt.datetime.now():%H:%M:%S} start: {shown}  (in {job.cwd})", logfile)
         self._changed(job)
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1", **{k: str(v) for k, v in job.env.items()})
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform.startswith("win") else 0
+        flags = spawn_flags()
         try:
             if shell:
                 job.proc = await asyncio.create_subprocess_shell(argv, cwd=job.cwd, env=env, stdin=asyncio.subprocess.DEVNULL,
@@ -389,6 +390,14 @@ class JobManager:
         while True:
             now = time.time()
             for job in list(self.jobs.values()):
+                if job.service and job.autostart and not job.running and job.status == "failed" and job.last_end:
+                    # an autostart service that died (not stopped by the user) comes back, with growing pauses
+                    if now - job.last_end >= restart_delay(job.restarts):
+                        job.restarts += 1
+                        self.start(job.id)
+                    continue
+                if job.service and job.running and job.last_start and now - job.last_start > 1800:
+                    job.restarts = 0                  # ran half an hour: count the next death as a first one
                 if not job.schedule or job.running or job.service:
                     continue
                 due = next_run(job.schedule, now, job.last_start)
@@ -447,6 +456,24 @@ def _version(path: Path):
         return (st.st_mtime_ns, st.st_size) if path.is_file() and st.st_size else None
     except OSError:
         return None
+
+
+def spawn_flags() -> int:
+    """Windows: own process group (stoppable as a tree) and NO console window. SessionDesk in the background runs
+    under pythonw without a console, so every console program it starts (python.exe, cmd for .bat, powershell)
+    got a new, empty window - the output goes to the job log. 26.10.2026 closing those windows killed the news
+    watcher four times (exit 0xC000013A = closed console) and the EA showed headlines hours old."""
+    if not sys.platform.startswith("win"):
+        return 0
+    return subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+
+
+RESTART_DELAYS = (30, 60, 120, 300, 600)       # seconds before the n-th restart of a service that died
+
+
+def restart_delay(restarts: int) -> float:
+    """Wait before restarting an autostart service after its restarts-th unexpected exit (pure, tested)."""
+    return RESTART_DELAYS[min(restarts, len(RESTART_DELAYS) - 1)]
 
 
 def kill_tree(pid: int) -> None:

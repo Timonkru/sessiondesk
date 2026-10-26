@@ -84,7 +84,7 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         state["ctx"] = ctx
         tasks = []
         if start_background:
-            tasks = [asyncio.ensure_future(t) for t in background(ctx)]
+            tasks = [asyncio.ensure_future(t) for t in background(ctx)] + [asyncio.ensure_future(_self_check(app, ctx, home))]
         try:
             yield
         finally:
@@ -1038,6 +1038,46 @@ def lambda_scan(ctx, result: dict | None = None):
 
 # ---------------------------------------------------------------------- background loops
 market_hours = movers.market_hours
+
+
+def superseded(run_info: dict | None, pid: int, port: int) -> bool:
+    """Has a newer SessionDesk taken over this port (pure, tested)? Then this process must end."""
+    return bool(run_info) and run_info.get("port") == port and run_info.get("pid") not in (None, pid)
+
+
+async def _self_check(app, ctx, home: Path, every: float = 60.0, misses_allowed: int = 3) -> None:
+    """End this process when it no longer serves its port. 26.10.2026: the listening socket of the 09:10 instance
+    died (WinError 64, accept failed) - the process lived on without a port, kept polling news, pushing to Telegram
+    and running the jobs, and the next start at 10:35 ran beside it: two schedulers, two news watchers."""
+    import json
+    await asyncio.sleep(every)
+    misses = 0
+    while True:
+        server = getattr(app.state, "server", None)
+        if server is None:                       # not started by the launcher (tests, embedding): nothing to watch
+            return
+        port, pid = server.config.port, os.getpid()
+        try:
+            info = json.loads((home / "run.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = None
+        reason = None
+        if superseded(info, pid, port):
+            reason = f"another SessionDesk (pid {info['pid']}) now serves port {port}"
+        else:
+            try:
+                resp = await ctx.http.get(f"http://127.0.0.1:{port}/", timeout=10)
+                misses = 0 if resp.status_code < 500 else misses + 1
+            except Exception:
+                misses += 1
+            if misses >= misses_allowed:
+                reason = f"port {port} has not answered {misses} checks in a row"
+        if reason:
+            print(f"--- {time.strftime('%H:%M:%S')} stopping: {reason}", flush=True)
+            server.should_exit = True              # lifespan shutdown stops the jobs (kill_tree)
+            await asyncio.sleep(30)
+            os._exit(0)                            # the server loop itself may be the broken part
+        await asyncio.sleep(every)
 
 
 async def _news_stream_loop(ctx):
