@@ -358,6 +358,8 @@ class MT5Bridge(Connector):
                 out.append({"account": mask(f["login"], hide), "ticket": r.get("ticket"), "time": num(r.get("time_utc")),
                             "symbol": r.get("symbol"), "type": r.get("type"), "entry": r.get("entry"),
                             "volume": num(r.get("volume")), "price": num(r.get("price")), "net": deal_net(r),
+                            "profit": num(r.get("profit")), "commission": num(r.get("commission")),
+                            "swap": num(r.get("swap")), "fee": num(r.get("fee")),
                             "magic": r.get("magic"), "position_id": r.get("position_id")})
         for login, data in self._old("deals", "deals"):
             if login in seen:

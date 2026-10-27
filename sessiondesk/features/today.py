@@ -185,38 +185,8 @@ async def snapshot(ctx) -> dict:
 
 async def briefing_facts(ctx, kind: str = "briefing") -> dict:
     """Facts for the AI: everything computed by SessionDesk, compact."""
-    from . import broker as broker_view
-    from . import macro, markets
-    now = time.time()
-    facts: dict = {"generated_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")}
     if kind == "review":
-        b = await broker_view.overview(ctx)
-        facts["closed_trades_7d_by_setup"] = b.get("performance_7d")
-        facts["closed_trades_30d_by_setup"] = b.get("performance_30d")
-        facts["journal_7d"] = await ctx.db.run(ctx.db.journal, now - 7 * 86400, 200)
-        facts["notes"] = await ctx.db.run(ctx.db.notes, 40)
-        facts["activity_7d"] = [a for a in await ctx.db.run(ctx.db.activity, 200, now - 7 * 86400) if a["kind"] in ("position", "rule", "level")]
-        return facts
-    ov = await markets.overview(ctx)
-    facts["markets"] = [{"group": g["title"], "rows": [{"name": r["label"], "last": r.get("price"), "chg_pct": r.get("change_pct"),
-                                                         "chg_bp": r.get("change_bp")} for r in g["rows"]]} for g in ov.get("groups", [])]
-    snap = await snapshot(ctx)
-    facts["accounts"] = [{k: m.get(k) for k in ("login", "equity", "currency", "day_pct", "daily_loss_room_pct", "own_stop_room_pct",
-                                                 "losers_left", "risk_pct", "positions")} for m in snap["accounts"]]
-    facts["rule_flags"] = snap["flags"]
-    facts["events_next_36h"] = [{"utc": dt.datetime.fromtimestamp(e["ts"], dt.timezone.utc).strftime("%a %H:%M"), "ccy": e["currency"],
-                                 "event": e["title"], "impact": e["impact"], "forecast": e.get("forecast"), "previous": e.get("previous"),
-                                 "actual": e.get("actual")} for e in snap["events"]]
-    facts["schedule_today"] = [{"in_min": round(s["in_sec"] / 60), "session": s["session"], "label": s["label"],
-                                "collides_with": s["collisions"]} for s in snap["schedule"][:12]]
-    facts["forced_flows_5d"] = [{"date": f["date"], "event": f["name"], "size": f["size"]} for f in snap["flows"]]
-    mv = ctx.cache.peek("movers:last") or {}
-    facts["unusual_moves"] = [{"symbol": f["symbol"], "pct": f["pct"], "z": f.get("z"), "explanation": f.get("explanation")}
-                              for f in (mv.get("flagged") or [])[:10]]
-    heads = await ctx.db.run(ctx.db.query_news, None, None, None, None, 60, int(now - 14 * 3600))
-    facts["headlines_14h"] = [{"t": dt.datetime.fromtimestamp(h["published"], dt.timezone.utc).strftime("%H:%M"), "src": h["source"],
-                               "title": h["title"], "impact": h["impact"]} for h in heads if h["impact"] != "normal"][:40]
-    vol = await macro.vol(ctx)
-    if "error" not in vol:
-        facts["volatility"] = {k: vol.get(k) for k in ("state", "slope", "risk_premium", "realized_20d")} | {"curve": vol.get("curve")}
-    return facts
+        from .review import build_facts
+        return await build_facts(ctx)
+    from .briefing import build_facts
+    return await build_facts(ctx)
