@@ -1,13 +1,42 @@
 // Alerts: one-shot alerts on any number - a price, a Data hub series, a stock's measures, or any member of a basket.
 import { api } from "../lib/api.js";
-import { h, clear, table, section, num, note, loading, errorBox, stamp, toast } from "../lib/ui.js";
+import { h, clear, table, section, num, note, loading, errorBox, stamp, toast, price, signed, asOf } from "../lib/ui.js";
 
 const SOURCES = [["quote", "Price"], ["hub", "Data hub series"], ["stock", "Stock measure"], ["basket", "Basket (any member)"]];
 
 export async function render(root, _params, ctx) {
-  const formBox = h("div"), listBox = h("div", null, loading());
+  const formBox = h("div"), listBox = h("div", null, loading()), sthBox = h("div", null, loading());
   root.append(h("div", { class: "pagehead" }, h("h1", null, "Alerts"), h("span", { class: "meta" }, "on prices, data series, stock measures and baskets")),
+    section("BTC near the short-term holder cost basis", sthBox),
     h("div", { class: "cols" }, section("Your alerts", listBox), section("New alert", formBox)));
+
+  // BTC vs the short-term holder realized price: a standing zone alert (features/sthzone.py), not a one-shot alert
+  const loadSth = async (put) => {
+    const d = put ? await api("/api/sth_zone", { method: "PUT", body: put }) : await api("/api/sth_zone", { fresh: true });
+    if (d.error) { clear(sthBox, errorBox(d.error)); return; }
+    const c = d.config || {}, lv = d.level || {};
+    if (lv.error) { clear(sthBox, note(lv.error)); return; }
+    const band = h("input", { type: "text", inputmode: "decimal", value: String(c.band), style: { width: "80px" } });
+    const on = h("input", { type: "checkbox", checked: !!c.enabled });
+    const inside = d.diff != null && Math.abs(d.diff) <= c.band;
+    const ck = lv.check;
+    clear(sthBox,
+      h("div", { class: "keystrip" },
+        h("div", null, h("span", { class: "k" }, "STH realized price"), h("span", { class: "v" }, price(lv.value) + " $")),
+        h("div", null, h("span", { class: "k" }, "BTC"), h("span", { class: "v" }, d.price == null ? "–" : price(d.price) + " $")),
+        h("div", null, h("span", { class: "k" }, "distance"), h("span", { class: "v " + (inside ? "warn" : "") }, d.diff == null ? "–" : signed(d.diff, 0) + " $")),
+        h("div", null, h("span", { class: "k" }, "zone"), h("span", { class: "v" }, d.zone ? `${price(d.zone[0])} – ${price(d.zone[1])}` : "–"))),
+      h("p", { class: "small" }, asOf(lv.day, { label: "level of", maxAgeHours: 24 * (c.max_age_days || 3) + 24, stale: d.paused }),
+        " · ", h("a", { href: lv.url, target: "_blank", rel: "noopener noreferrer" }, lv.series === "onchain:sth_rp" ? "checkonchain ↗" : "BGeometrics ↗"),
+        ck ? ` · cross-check ${ck.day}: checkonchain ${price(ck.checkonchain)} vs BGeometrics ${price(ck.bgeometrics)} (${signed(ck.diff, 0)} $)` : "",
+        d.paused ? h("span", { class: "warn" }, ` · alert paused: level older than ${c.max_age_days} days`) : ""),
+      h("div", { class: "toolbar" }, h("label", null, on, " alert on"), h("span", { class: "small muted" }, "zone ±"), band, h("span", { class: "small muted" }, "$"),
+        h("button", { onclick: () => loadSth({ enabled: on.checked, band: band.value.replace(",", ".") }) }, "Save"),
+        h("a", { class: "small", href: "#/hub/" + encodeURIComponent(lv.series) }, "history ›")),
+      note(d.note));
+    facts.sth_zone = { level: lv.value, level_day: lv.day, btc: d.price, distance: d.diff, band: c.band, enabled: c.enabled, paused: d.paused };
+  };
+  const facts = {};
 
   const [hub, baskets] = await Promise.all([api("/api/hub", { ttl: 300000 }), api("/api/baskets", { ttl: 60000 })]);
   let fields = {};
@@ -25,7 +54,7 @@ export async function render(root, _params, ctx) {
       { label: "", render: (a) => [a.active ? null : h("button", { class: "linkish", onclick: () => act(a, { rearm: true }) }, "re-arm"), " ",
         h("button", { class: "linkish", onclick: () => { if (confirm("Delete this alert?")) act(a, { delete: true }); } }, "delete")] },
     ], d.alerts || [], { empty: "No alerts yet - create one on the right." }), note(d.note));
-    ctx.setContext({ page: "Alerts", alerts: (d.alerts || []).map((a) => ({ title: a.title, now: a.value, active: a.active, triggered: a.triggered, matches: a.matches })) });
+    ctx.setContext({ page: "Alerts", ...facts, alerts: (d.alerts || []).map((a) => ({ title: a.title, now: a.value, active: a.active, triggered: a.triggered, matches: a.matches })) });
   };
 
   const draw = (source) => {
@@ -61,8 +90,8 @@ export async function render(root, _params, ctx) {
       h("div", { class: "toolbar" }, h("button", { onclick: save }, "Create alert")), note(hint));
   };
 
-  await load();
+  await Promise.all([load(), loadSth()]);
   draw("quote");
-  const t = setInterval(load, 30000);
+  const t = setInterval(() => { load(); loadSth(); }, 30000);
   return () => clearInterval(t);
 }

@@ -188,6 +188,28 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         return {"chats": list(chats.values()), "note": "Send any message to your bot first, then look again."}
 
     # ------------------------------------------------------------------ price alerts you set yourself
+    @app.get("/api/sth_zone")
+    async def get_sth_zone():
+        from .features import sthzone
+        return await sthzone.status(C())
+
+    @app.put("/api/sth_zone")
+    async def set_sth_zone(request: Request):
+        from .features import sthzone
+        body = await request.json()
+        cur = {k: v for k, v in sthzone.config(C().settings).items() if k in ("enabled", "band", "rearm", "max_age_days")}
+        try:
+            if "band" in body:
+                cur["band"] = min(max(float(body["band"]), 1.0), 20000.0)
+            if "rearm" in body:
+                cur["rearm"] = min(max(float(body["rearm"]), 0.0), 20000.0)
+        except (TypeError, ValueError):
+            return {"error": "band and rearm are numbers in dollars"}
+        if "enabled" in body:
+            cur["enabled"] = bool(body["enabled"])
+        C().settings.replace("sth_zone", cur)
+        return await sthzone.status(C())
+
     @app.get("/api/price_alerts")
     async def get_price_alerts():
         return await pricealerts.listing(C())
@@ -1120,6 +1142,10 @@ def background(ctx) -> list:
     async def price_alert_check():
         await pricealerts.run_check(ctx)
 
+    async def sth_check():
+        from .features import sthzone
+        await sthzone.run_check(ctx)
+
     async def company_watch():
         from .features import assets as assets_mod
         held = await news.held(ctx)
@@ -1266,6 +1292,8 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("rates"), first_delay=540, name="hub rates by country"),
         every(lambda: 6 * 3600, hub_loop("entsog"), first_delay=360, name="hub entsog"),
         every(lambda: 6 * 3600, hub_loop("agsi"), first_delay=420, name="hub agsi"),
+        every(lambda: 6 * 3600, hub_loop("onchain"), first_delay=60, name="hub on-chain"),
+        every(lambda: 30, sth_check, first_delay=90, name="BTC STH zone"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),
         ctx.extras["jobs"].scheduler(),

@@ -608,9 +608,15 @@ async def _collect_rates(ctx) -> int:
     return await collect(ctx)
 
 
+async def _collect_onchain(ctx) -> int:
+    from .onchain import collect
+    return await collect(ctx)
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
               "news": (collect_news, 3600), "power": (collect_power, 3 * 3600), "entsog": (collect_entsog, 6 * 3600),
-              "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600), "rates": (_collect_rates, 6 * 3600)}
+              "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600), "rates": (_collect_rates, 6 * 3600),
+              "onchain": (_collect_onchain, 6 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views
@@ -665,6 +671,9 @@ def source_url(series_id: str) -> str | None:
         return "#/baskets/" + key
     if kind == "news":
         return "#/news"
+    if kind == "onchain":
+        from .onchain import BGEO_PAGE, COC_PAGE
+        return BGEO_PAGE if key.endswith("_bgeo") else COC_PAGE
     return None
 
 
@@ -675,7 +684,7 @@ GROUPS = [
     ("equities", "Equities", ["Americas", "Europe", "Asia-Pacific", "Middle East & Africa", "Index futures", "US sectors", "Your baskets"]),
     ("rates", "Rates & credit", ["Government yields", "US rates (FRED)", "US yields intraday (Cboe)", "Credit & liquidity"]),
     ("macro", "Macro", ["Inflation & growth"]),
-    ("fx", "FX & crypto", ["FX", "Crypto"]),
+    ("fx", "FX & crypto", ["FX", "Crypto", "On-chain (Bitcoin)"]),
     ("vol", "Volatility", ["Volatility indices", "Options implied volatility (30d ATM)"]),
     ("energy", "Energy & commodities", ["Commodity futures", "Oil (EIA weekly)", "Gas (EIA weekly)", "Gas flows (ENTSOG)", AGSI_CATEGORY,
                                         "Power (day-ahead)", "Tanker traffic (AIS)"]),
