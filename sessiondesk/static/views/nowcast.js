@@ -16,7 +16,8 @@ function consensusCell(r) {
   const c = r.consensus;
   if (!c) return h("span", { class: "muted small" }, "no consensus");
   return [h("span", null, big(c.revenue)), h("div", { class: "small muted" }, c.source + (c.analysts ? ` · ${c.analysts} analysts` : "")),
-    c.matches_quarter === false ? h("div", { class: "small warn" }, "year-ago figure differs from the SEC quarter: not compared") : null];
+    r.quarter?.stale ? null
+      : c.matches_quarter === false ? h("div", { class: "small warn" }, "year-ago figure differs from the SEC quarter: not compared") : null];
 }
 
 function beatCell(b, status) {
