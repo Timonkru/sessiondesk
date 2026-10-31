@@ -332,9 +332,89 @@ class Sec(Connector):
             raise ConnectorError(f"SEC HTTP {resp.status_code}")
         return parse_sec_submissions(resp.json(), cik, limit)
 
+    async def cik(self, symbol: str) -> int | None:
+        return (await self._cik_map()).get(symbol.upper().replace(".", "-"))
+
+    async def company_facts(self, symbol: str) -> dict:
+        """XBRL company facts (every number the company tagged in its 10-Q/10-K filings); {} for non-US filers."""
+        cik = await self.cik(symbol)
+        if not cik:
+            return {}
+        resp = await self.ctx.http.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", headers=self._ua(), timeout=60)
+        if resp.status_code == 404:
+            return {}
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return resp.json()
+
+    async def form4_list(self, symbol: str, limit: int = 60) -> list[dict]:
+        """Newest Form 4 filings about this issuer: [{accession, date, xml}] - xml is the raw ownership document."""
+        cik = await self.cik(symbol)
+        if not cik:
+            return []
+        resp = await self.ctx.http.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=self._ua(), timeout=20)
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return parse_form4_list(resp.json(), cik, limit)
+
+    async def form4_document(self, url: str) -> str:
+        """The Archives host answers 403 unless the User-Agent carries a contact email (checked 2026-10-31)."""
+        if not self.option("contact_email"):
+            raise ConnectorError("SEC contact email needed (Settings → Connectors → SEC EDGAR)")
+        resp = await self.ctx.http.get(url, headers=self._ua(), timeout=20)
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return resp.text
+
     async def test(self) -> dict:
         rows = await self.filings("AAPL", 3)
         return {"ok": bool(rows), "detail": f"AAPL latest {rows[0]['form']} {rows[0]['date']}" if rows else "no filings"}
+
+
+def parse_form4_list(data: dict, cik: int, limit: int) -> list[dict]:
+    """Form 4 rows of an issuer's submissions; the primary document points at the XSL rendering, the raw XML sits
+    one folder up (pure, tested)."""
+    recent = (data.get("filings") or {}).get("recent") or {}
+    out = []
+    for i, form in enumerate(recent.get("form", [])):
+        if form != "4":
+            continue
+        acc = recent["accessionNumber"][i]
+        doc = (recent.get("primaryDocument") or [""] * (i + 1))[i] or ""
+        if not doc.endswith(".xml"):
+            continue
+        out.append({"accession": acc, "date": recent["filingDate"][i],
+                    "xml": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc.split('/')[-1]}"})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_form4(xml: str) -> dict:
+    """Open-market insider trades of one Form 4: purchases (code P) and sales (code S) in shares x price; grants,
+    option exercises, tax withholding and gifts are left out (pure, tested)."""
+    import xml.etree.ElementTree as ET
+    out = {"buy_usd": 0.0, "sell_usd": 0.0, "buys": 0, "sells": 0}
+    try:
+        root = ET.fromstring(xml.encode("utf-8") if isinstance(xml, str) else xml)
+    except ET.ParseError:
+        return out
+    for tr in root.iter("nonDerivativeTransaction"):
+        code = (tr.findtext("transactionCoding/transactionCode") or "").strip()
+        if code not in ("P", "S"):
+            continue
+        try:
+            shares = float(tr.findtext("transactionAmounts/transactionShares/value") or 0)
+            price = float(tr.findtext("transactionAmounts/transactionPricePerShare/value") or 0)
+        except ValueError:
+            continue
+        if code == "P":
+            out["buy_usd"] += shares * price
+            out["buys"] += 1
+        else:
+            out["sell_usd"] += shares * price
+            out["sells"] += 1
+    return out
 
 
 SEC_FORMS = {"8-K": "material event", "10-Q": "quarterly report", "10-K": "annual report", "4": "insider transaction",

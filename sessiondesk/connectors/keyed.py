@@ -4,13 +4,14 @@ All of these are written against the vendors' public API documentation and are m
 verified=False until someone runs them with a real key - the Connectors page shows that, and
 "Test connection" makes the cheapest real call so the user sees immediately whether it works.
 
-  finnhub           news (general + company), earnings calendar, quotes (US), economic calendar (premium)
-  fmp               Financial Modeling Prep: fundamentals, DCF, economic calendar, news
+  finnhub           news (general + company), earnings calendar + history, quotes (US), economic calendar (premium)
+  fmp               Financial Modeling Prep: fundamentals, DCF, economic calendar, news, earnings history
   polygon           Polygon.io / Massive: snapshots, aggregates, news
   alphavantage      news with sentiment, quotes (25 calls/day on the free key)
   tradingeconomics  economic calendar WITH actual values (fast release output)
   alpaca            broker, READ-ONLY: account + positions; plus Benzinga news and IEX quotes
   agsi              GIE AGSI+: EU gas storage per country (fill level, injection, withdrawal), free key
+  quiver            Quiver Quantitative: alternative data per ticker (paid)
 """
 from __future__ import annotations
 
@@ -105,6 +106,16 @@ class Finnhub(Connector):
                  "revenue_forecast": r.get("revenueEstimate"), "revenue_actual": r.get("revenueActual")}
                 for r in data.get("earningsCalendar", [])]
 
+    async def earnings_history(self, symbol: str) -> list[dict]:
+        """Past quarters, estimate vs actual: EPS from /stock/earnings (free: last 4 quarters), revenue from the
+        earnings calendar filtered to the symbol (how far back depends on the plan)."""
+        eps, cal = await asyncio.gather(self._get("/stock/earnings", symbol=symbol, limit=40),
+                                        self._get("/calendar/earnings", symbol=symbol, **{"from": "2015-01-01", "to": dt.date.today().isoformat()}),
+                                        return_exceptions=True)
+        if isinstance(eps, Exception) and isinstance(cal, Exception):
+            raise eps
+        return merge_history(finnhub_history(eps if isinstance(eps, list) else [], cal if isinstance(cal, dict) else {}))
+
     async def calendar(self, start: float | None = None, end: float | None = None) -> list[dict]:
         d0 = dt.datetime.fromtimestamp(start or time.time() - 86400, dt.timezone.utc).date()
         d1 = dt.datetime.fromtimestamp(end or time.time() + 7 * 86400, dt.timezone.utc).date()
@@ -192,6 +203,72 @@ class FMP(Connector):
         rows = await self._get("/earnings-calendar", **{"from": start.isoformat(), "to": (start + dt.timedelta(days=days)).isoformat()})
         return [{"symbol": r.get("symbol"), "date": r.get("date"), "timing": "n/a", "eps_forecast": r.get("epsEstimated"),
                  "eps_actual": r.get("epsActual"), "revenue_forecast": r.get("revenueEstimated")} for r in rows or []]
+
+    async def earnings_history(self, symbol: str) -> list[dict]:
+        """Past (and the next) quarters with EPS and revenue, estimate vs actual (/stable/earnings)."""
+        rows = await self._get("/earnings", symbol=symbol, limit=60)
+        return merge_history([{"date": r.get("date"), "period": None, "eps_estimate": _f(r.get("epsEstimated")),
+                               "eps_actual": _f(r.get("epsActual")), "revenue_estimate": _f(r.get("revenueEstimated")),
+                               "revenue_actual": _f(r.get("revenueActual"))} for r in rows or [] if isinstance(r, dict)])
+
+
+def finnhub_history(eps_rows: list[dict], calendar: dict) -> list[dict]:
+    """Finnhub /stock/earnings (keyed by fiscal period end) and calendar rows (keyed by report date) -> one shape;
+    the two are matched by fiscal year + quarter (pure, tested)."""
+    out: dict[tuple, dict] = {}
+    for r in calendar.get("earningsCalendar") or []:
+        key = (r.get("year"), r.get("quarter"))
+        out[key] = {"date": r.get("date"), "period": None, "eps_estimate": _f(r.get("epsEstimate")), "eps_actual": _f(r.get("epsActual")),
+                    "revenue_estimate": _f(r.get("revenueEstimate")), "revenue_actual": _f(r.get("revenueActual"))}
+    for r in eps_rows:
+        key = (r.get("year"), r.get("quarter"))
+        row = out.setdefault(key, {"date": None, "revenue_estimate": None, "revenue_actual": None})
+        row.update({"period": r.get("period"), "eps_estimate": _f(r.get("estimate")) if row.get("eps_estimate") is None else row["eps_estimate"],
+                    "eps_actual": _f(r.get("actual")) if row.get("eps_actual") is None else row["eps_actual"]})
+        row["date"] = row.get("date") or r.get("period")
+    return list(out.values())
+
+
+def merge_history(rows: list[dict]) -> list[dict]:
+    """Oldest first, one row per date, rows without any number dropped (pure, tested)."""
+    keep = {}
+    for r in rows:
+        if r.get("date") and any(r.get(k) is not None for k in ("eps_estimate", "eps_actual", "revenue_estimate", "revenue_actual")):
+            keep[str(r["date"])[:10]] = {**r, "date": str(r["date"])[:10]}
+    return [keep[d] for d in sorted(keep)]
+
+
+# ================================================================== Quiver Quantitative
+class Quiver(Connector):
+    id = "quiver"
+    name = "Quiver Quantitative"
+    tier = "paid"
+    capabilities = ("alt_data",)
+    fields = (Field("api_key", "API token", help="quiverquant.com -> account -> API. Alternative data per ticker (paid plans)."),)
+    homepage = "https://www.quiverquant.com"
+    description = ("Alternative data per US ticker: Wikipedia views, app ratings, corporate flights, government contracts, "
+                   "lobbying, congress trading, WallStreetBets mentions. Not verified with a live key yet.")
+    verified = False
+    BASE = "https://api.quiverquant.com/beta"
+    # dataset -> path; written from Quiver's API docs, unverified until someone runs it with a key
+    DATASETS = {"wikipedia": "/historical/wikipedia/{t}", "appratings": "/historical/appratings/{t}",
+                "flights": "/historical/flights/{t}", "govcontracts": "/historical/govcontractsall/{t}",
+                "lobbying": "/historical/lobbying/{t}", "congress": "/historical/congresstrading/{t}",
+                "wallstreetbets": "/historical/wallstreetbets/{t}"}
+
+    async def _get(self, path: str, **params):
+        return await self.get_json(self.BASE + path, params=params or None,
+                                   headers={"Authorization": f"Bearer {self.secret('api_key') or ''}", "Accept": "application/json"})
+
+    async def test(self) -> dict:
+        rows = await self._get("/live/congresstrading")
+        return {"ok": isinstance(rows, list), "detail": f"{len(rows) if isinstance(rows, list) else 0} congress trades"}
+
+    async def dataset(self, name: str, ticker: str) -> list[dict]:
+        if name not in self.DATASETS:
+            raise ConnectorError(f"unknown Quiver dataset {name!r}")
+        rows = await self._get(self.DATASETS[name].format(t=ticker.upper()))
+        return rows if isinstance(rows, list) else []
 
 
 # ================================================================== Polygon / Massive

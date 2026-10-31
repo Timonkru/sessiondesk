@@ -8,6 +8,8 @@ Sources (free, no key needed):
   - power: European day-ahead prices (Energy-Charts); gas: EU imports by route and LNG send-out (ENTSOG)
   - gas storage: GIE AGSI+ per country and EU (free key, only when the user entered one)
   - attention: headlines per day and theme (Fed, ECB, oil, tariffs, geopolitics ...) from your own news archive
+  - company proxies: Wikipedia pageviews, TSA travellers, Steam players, App Store ranks, Indeed postings, insider
+    trades per company of <data dir>/earnings_proxies.json (features/proxies.py)
 
 Early warning = the latest change is unusual for THIS series: robust z-score against its own last 250 changes
 (median and MAD, so one old crash does not hide everything). It describes, it does not predict.
@@ -292,7 +294,7 @@ POWER_ZONES = [("DE-LU", "Germany"), ("FR", "France"), ("NL", "Netherlands"), ("
                ("CH", "Switzerland"), ("IT-North", "Italy North"), ("ES", "Spain"), ("PL", "Poland"), ("DK1", "Denmark West"),
                ("NO2", "Norway South"), ("SE3", "Sweden Central")]
 POWER_PAUSE = 20.0                                  # seconds between zones; the API answers 429 to quick bursts
-SLOW_COLLECTORS = {"power", "entsog", "agsi", "iv"}       # "collect now" starts these in the background
+SLOW_COLLECTORS = {"power", "entsog", "agsi", "iv", "proxies"}       # "collect now" starts these in the background
 
 
 def _berlin():
@@ -390,7 +392,9 @@ ENTSOG_PAUSE = 4.0                                  # seconds between requests
 # (nominations, cargoes): on three years of data TAP would have warned on 52 of the last 120 days, Libya on 44,
 # Polish LNG on 55, the two totals on 1 and 0 (measured 2026-10-20). So only the totals warn. AGSI injection and
 # withdrawal sit at zero for months and then jump; the fill level keeps its warnings.
-NO_WARN_PREFIX = ("entsog:",)
+# Company proxies (features/proxies.py) jump on every news day of a company (pageviews) or move in steps (chart
+# ranks, monthly insider sums); their z is shown, the Earnings nowcast page has its own alert (off by default).
+NO_WARN_PREFIX = ("entsog:", "wiki:", "tsa:", "steam:", "apps:", "indeed:", "form4:")
 NO_WARN_SUFFIX = (":injection", ":withdrawal")
 WARN_ANYWAY = {"entsog:total", "entsog:lng_total"}
 # Yahoo's continuous energy futures jump when Yahoo rolls to the next contract: 26.10.2026 "Natural gas +4.0 sigma"
@@ -613,10 +617,15 @@ async def _collect_onchain(ctx) -> int:
     return await collect(ctx)
 
 
+async def _collect_proxies(ctx) -> int:
+    from .proxies import collect
+    return await collect(ctx)
+
+
 COLLECTORS = {"markets": (collect_markets, 900), "fred": (collect_fred, 6 * 3600), "eia": (collect_eia_all, 6 * 3600),
               "news": (collect_news, 3600), "power": (collect_power, 3 * 3600), "entsog": (collect_entsog, 6 * 3600),
               "agsi": (collect_agsi, 6 * 3600), "iv": (collect_iv, 2 * 3600), "rates": (_collect_rates, 6 * 3600),
-              "onchain": (_collect_onchain, 6 * 3600)}
+              "onchain": (_collect_onchain, 6 * 3600), "proxies": (_collect_proxies, 3 * 3600)}
 
 
 # ------------------------------------------------------------------ warnings and views
@@ -671,6 +680,18 @@ def source_url(series_id: str) -> str | None:
         return "#/baskets/" + key
     if kind == "news":
         return "#/news"
+    if kind == "wiki":
+        return "https://pageviews.wmcloud.org/?project=en.wikipedia.org"
+    if kind == "tsa":
+        return "https://www.tsa.gov/travel/passenger-volumes"
+    if kind == "steam":
+        return "https://store.steampowered.com/stats/"
+    if kind == "apps":
+        return "https://apps.apple.com/us/charts/iphone"
+    if kind == "indeed":
+        return "https://data.indeed.com/#/postings"
+    if kind == "form4":
+        return "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=4&company=&CIK=" + key.split(":")[0]
     if kind == "onchain":
         from .onchain import BGEO_PAGE, COC_PAGE
         return BGEO_PAGE if key.endswith("_bgeo") else COC_PAGE
@@ -689,6 +710,7 @@ GROUPS = [
     ("energy", "Energy & commodities", ["Commodity futures", "Oil (EIA weekly)", "Gas (EIA weekly)", "Gas flows (ENTSOG)", AGSI_CATEGORY,
                                         "Power (day-ahead)", "Tanker traffic (AIS)"]),
     ("attention", "News attention", ["Attention (your news archive)"]),
+    ("companies", "Company proxies", ["Company proxies"]),
 ]
 RENAME = {"Rates": "US rates (FRED)", "Euro area": "Government yields", "Rates by country": "Government yields", "Futures": "Index futures",
           "Commodities": "Commodity futures", "Volatility": "Volatility indices", "Implied volatility": "Options implied volatility (30d ATM)"}

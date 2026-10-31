@@ -8,10 +8,10 @@ sessiondesk/app.py  FastAPI: routes, security guard, background loops
    |
    +-- features/   one module per page: turns connector data into what the page shows
    |     markets  stocks  deep  valuation  movers  news  calendar  flows  research  macro  broker  jobs
-   |     today  levels  risk  journal  indices  assets  universe  feeds  system
+   |     today  levels  risk  journal  indices  assets  universe  feeds  system  proxies  nowcast
    +-- connectors/ one class per outside system, normalized shapes (see base.py)
    |     yahoo  rss  public (fred, treasury, cnbc, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
-   |     alphavantage, tradingeconomics, alpaca)  registry.py (the list + planned entries)
+   |     alphavantage, tradingeconomics, alpaca, agsi, quiver)  registry.py (the list + planned entries)
    +-- ai/         providers.py (Anthropic SDK, OpenAI-compatible, Gemini, Ollama) + assist.py (rules, prompts)
    +-- push.py     phone push (ntfy / own Telegram bot): broker listener -> queue -> sender, off by default
    +-- extensions.py  the user's own pages from <data dir>/extensions/

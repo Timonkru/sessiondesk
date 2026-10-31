@@ -210,6 +210,31 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         C().settings.replace("sth_zone", cur)
         return await sthzone.status(C())
 
+    @app.get("/api/nowcast")
+    async def get_nowcast(fresh: bool = False):
+        from .features import nowcast
+        if fresh:
+            C().cache.invalidate("nowcast:page")
+        return await nowcast.page(C())
+
+    @app.put("/api/nowcast_alert")
+    async def set_nowcast_alert(request: Request):
+        from .features import nowcast
+        body = await request.json()
+        cur = nowcast.alert_config(C().settings)
+        try:
+            if "gap_sd" in body:
+                cur["gap_sd"] = min(max(float(body["gap_sd"]), 0.5), 10.0)
+            if "min_z" in body:
+                cur["min_z"] = min(max(float(body["min_z"]), 0.0), 10.0)
+        except (TypeError, ValueError):
+            return {"error": "gap_sd and min_z are numbers"}
+        if "enabled" in body:
+            cur["enabled"] = bool(body["enabled"])
+        C().settings.replace("nowcast_alert", cur)
+        C().cache.invalidate("nowcast:page")
+        return {"alert": nowcast.alert_config(C().settings)}
+
     @app.get("/api/price_alerts")
     async def get_price_alerts():
         return await pricealerts.listing(C())
@@ -1146,6 +1171,10 @@ def background(ctx) -> list:
         from .features import sthzone
         await sthzone.run_check(ctx)
 
+    async def nowcast_check():
+        from .features import nowcast
+        await nowcast.run_check(ctx)
+
     async def company_watch():
         from .features import assets as assets_mod
         held = await news.held(ctx)
@@ -1293,6 +1322,8 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("entsog"), first_delay=360, name="hub entsog"),
         every(lambda: 6 * 3600, hub_loop("agsi"), first_delay=420, name="hub agsi"),
         every(lambda: 6 * 3600, hub_loop("onchain"), first_delay=60, name="hub on-chain"),
+        every(lambda: 3 * 3600, hub_loop("proxies"), first_delay=600, name="hub company proxies"),
+        every(lambda: 1800, nowcast_check, first_delay=900, name="earnings nowcast alert"),
         every(lambda: 30, sth_check, first_delay=90, name="BTC STH zone"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),

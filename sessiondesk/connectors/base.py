@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 CAPABILITIES = ("quotes", "history", "search", "profile", "news", "symbol_news", "calendar",
-                "earnings", "filings", "series", "account", "positions", "eas")
+                "earnings", "filings", "series", "alt_data", "account", "positions", "eas")
 
 
 @dataclass

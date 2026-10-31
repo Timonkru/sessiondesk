@@ -37,6 +37,7 @@ const VIEWS = {
   baskets: () => import("./views/baskets.js"),
   commodities: () => import("./views/commodities.js"),
   tankers: () => import("./views/tankers.js"),
+  nowcast: () => import("./views/nowcast.js"),
 };
 
 const $ = (id) => document.getElementById(id);
