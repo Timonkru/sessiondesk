@@ -185,3 +185,41 @@ def test_nasdaq_eps_only_with_surprise_and_yahoo_match():
             {"when": "2025-10-22T16:00:00-04:00", "eps_estimate": 1.22, "eps_reported": 1.26}]
     assert yahoo_match(hist, "2026-10-21")["eps_reported"] == 2.20
     assert yahoo_match([{"when": "2026-10-21T16:00:00-04:00", "eps_estimate": 2.18, "eps_reported": None}], "2026-10-21") is None
+
+
+def test_day_from_history_counts_trades_closed_today_whenever_opened(client):
+    """A position opened on Friday and closed today belongs to today (MetaTrader's history "Today"); the day start
+    balance comes from the deal export, so it does not matter when SessionDesk was started."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    now = dt.datetime(2026, 11, 2, 15, 0, tzinfo=ZoneInfo("Europe/Prague")).timestamp()
+    start = today.day_start_ts(now, "Europe/Prague")
+    assert dt.datetime.fromtimestamp(start, ZoneInfo("Europe/Prague")).strftime("%Y-%m-%d %H:%M") == "2026-11-02 00:00"
+    assert today.trading_day(now) == "2026-11-02"
+    friday = start - 3 * 86400 + 10 * 3600
+    deals = [{"time": friday, "position_id": "1", "symbol": "US500", "type": "BUY", "entry": "0", "volume": 1, "net": -2.0},
+             {"time": start + 9 * 3600, "position_id": "1", "symbol": "US500", "type": "SELL", "entry": "1", "volume": 1, "net": 1411.0},
+             {"time": start + 10 * 3600, "position_id": "2", "symbol": "DE40", "type": "SELL", "entry": "0", "volume": 1, "net": -1.0},
+             {"time": start + 11 * 3600, "position_id": "2", "symbol": "DE40", "type": "BUY", "entry": "1", "volume": 1, "net": -200.0},
+             {"time": start + 12 * 3600, "position_id": "3", "symbol": "DE40", "type": "BUY", "entry": "0", "volume": 1, "net": -1.0}]  # still open
+    cash = [{"time": start + 8 * 3600, "type": "TAX", "amount": -50.0}, {"time": friday, "type": "BALANCE", "amount": 5000.0}]
+    h = today.day_from_history(deals, cash, balance=20000.0, start=start, now=now)
+    assert h["closed_today"] == pytest.approx(1409.0 - 201.0) and h["trades_today"] == 2
+    assert h["bookings_today"] == -50.0
+    # balance now 20000 = start + 1411 - 1 - 200 - 1 (deals today, 1209) - 50 (tax today)
+    assert h["day_start_balance"] == pytest.approx(20000.0 - 1209.0 + 50.0)
+    assert today.day_from_history(None, None, 1.0, start) is None and today.day_from_history([], [], None, start) is None
+    # the meter: the deal history beats a "first seen" balance recorded after the trades had closed
+    acc = {"login": "…002", "equity": 20300.0, "balance": 20000.0, "extra": {}}
+    m = today.prop_meter(acc, {"daily_loss_pct": 5}, 20000.0, h)
+    assert m["day_start_source"] == "deal history" and m["day_start"] == pytest.approx(18841.0)
+    assert m["day_pnl"] == pytest.approx(20300.0 - 18841.0) and m["closed_today"] == pytest.approx(1208.0)
+    m0 = today.prop_meter(acc, {"daily_loss_pct": 5}, 20000.0, None)
+    assert m0["day_start_source"] == "first seen today" and m0["day_pnl"] == pytest.approx(300.0) and "closed_today" not in m0
+    # the stored day start is replaced by the exact one, and only then
+    db = client.app_state["ctx"].db
+    assert db.day_start("…002", "2026-11-02", 20000.0, 20300.0)["balance"] == 20000.0
+    assert db.day_start("…002", "2026-11-02", 19000.0, 20300.0)["balance"] == 20000.0            # first sighting is kept
+    assert db.day_start("…002", "2026-11-02", 18841.0, 20300.0, replace=True)["balance"] == 18841.0
+    assert db.day_start("…002", "2026-11-02", 1.0, 1.0)["balance"] == 18841.0
+    assert db.day_starts()[("…002", "2026-11-02")] == 18841.0

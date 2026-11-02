@@ -1,6 +1,6 @@
 """Today: the trading day on one page.
 
-  accounts    equity, P/L since the day start, risk at the stops vs the budget, prop-rule meter
+  accounts    equity, P/L since the day start, trades closed today, risk at the stops vs the budget, prop-rule meter
   rule flags  breaches of your own risk rules in the open book
   schedule    your own times (relative to a cash open or absolute) with countdown, holiday-aware,
               and a warning when a high-impact release falls within +-15 minutes
@@ -13,6 +13,13 @@ Prop rules (settings["prop_rules"]): {"*": {...}, "<account or its last digits>"
   initial_balance  account size the overall limit refers to
   risk_per_trade_pct, max_slots   used for rule flags and "full-risk losers left"
   day_reset_tz     timezone of the day boundary (default Europe/Prague = the CE(S)T midnight most prop firms use)
+
+Day start balance, in this order: the exporter's day_start_balance (none of the bridges sends it so far); the balance
+reconstructed from the deal export (balance now minus every deal and cash booking since the day boundary - exact,
+and independent of when SessionDesk was started); the first balance SessionDesk saw on that day (wrong whenever the
+app came up after trades had already been closed: those results were then inside the "start" and missing from "today").
+"Closed today" = the net of the positions closed since the day boundary, whenever they were opened - the figure
+MetaTrader's history tab shows under "Today".
 """
 from __future__ import annotations
 
@@ -82,7 +89,29 @@ def trading_day(now: float, tz: str = "Europe/Prague") -> str:
     return dt.datetime.fromtimestamp(now, ZoneInfo(tz)).date().isoformat()
 
 
-def prop_meter(acc: dict, rule: dict, day_start: float | None) -> dict:
+def day_start_ts(now: float, tz: str = "Europe/Prague") -> float:
+    """Midnight of the trading day in the day-reset timezone, as a unix time (pure, tested)."""
+    local = dt.datetime.fromtimestamp(now, ZoneInfo(tz))
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def day_from_history(deals: list[dict] | None, cash: list[dict] | None, balance: float | None, start: float,
+                     now: float | None = None) -> dict | None:
+    """The day's figures from the deal export (pure, tested): the balance at the day boundary (balance now minus every
+    deal and cash booking since then), the net of the positions closed since then (whatever their open time), their
+    count, and the cash bookings of the day (deposits, tax, fees). None without a balance or without a deal export."""
+    from .report import closed_positions
+    if balance is None or deals is None:
+        return None
+    now = now or time.time()
+    since_deals = sum(d.get("net") or 0.0 for d in deals if (d.get("time") or 0) >= start)
+    since_cash = sum(c.get("amount") or 0.0 for c in (cash or []) if (c.get("time") or 0) >= start)
+    closed = closed_positions(deals, start, now + 1)
+    return {"day_start_balance": balance - since_deals - since_cash, "closed_today": sum(r["net"] for r in closed),
+            "trades_today": len(closed), "bookings_today": since_cash, "deals_today": since_deals}
+
+
+def prop_meter(acc: dict, rule: dict, day_start: float | None, history: dict | None = None) -> dict:
     equity = acc.get("equity")
     out = {"login": acc.get("login"), "equity": equity, "currency": acc.get("currency"), "rules": rule}
     if equity is None:
@@ -94,9 +123,15 @@ def prop_meter(acc: dict, rule: dict, day_start: float | None) -> dict:
             return float(extra[key])
         except (KeyError, TypeError, ValueError):
             return None
-    start = fx("day_start_balance") or day_start
+    hist_start = (history or {}).get("day_start_balance")
+    start = fx("day_start_balance") or hist_start or day_start
     out["day_start"] = start
-    out["day_start_source"] = "exporter" if fx("day_start_balance") else "first seen today" if day_start else None
+    out["day_start_source"] = ("exporter" if fx("day_start_balance") else "deal history" if hist_start is not None
+                               else "first seen today" if day_start else None)
+    if history:
+        out["closed_today"] = history["closed_today"]
+        out["trades_today"] = history["trades_today"]
+        out["bookings_today"] = history["bookings_today"]
     per_trade = rule.get("risk_per_trade_pct")
     mult = fx("risk_multiplier")
     out["risk_multiplier"] = mult
@@ -149,19 +184,47 @@ def rule_flags(accounts: list[dict], positions: list[dict], rules: dict) -> list
 
 
 # ------------------------------------------------------------------ assembly
+async def _history(ctx) -> tuple[dict, dict]:
+    """{account: deals}, {account: cash bookings} from every broker connector that exports a deal history."""
+    deals: dict = {}
+    cash: dict = {}
+    for c in ctx.hub.candidates("account") if ctx.hub else []:
+        if not hasattr(c, "deals"):
+            continue
+        try:
+            for d in await c.deals():
+                deals.setdefault(d.get("account"), []).append(d)
+            if hasattr(c, "cash"):
+                for r in (await c.cash()).get("rows") or []:
+                    cash.setdefault(r.get("account"), []).append(r)
+        except Exception:                      # noqa: BLE001 - no history: the meter falls back to the first balance seen
+            continue
+    return deals, cash
+
+
 async def snapshot(ctx) -> dict:
     from . import broker as broker_view
     now = time.time()
     rules = ctx.settings.get("prop_rules") or {}
     b = await broker_view.overview(ctx)
     accounts, positions = b.get("accounts", []), [p for p in b.get("positions", []) if p.get("fresh", True)]
+    deals, cash = await _history(ctx)
     meters = []
     for acc in accounts:
         rule = rules_for(acc.get("login") or "", rules)
-        day = trading_day(now, rule.get("day_reset_tz", "Europe/Prague"))
-        ds = await ctx.db.run(ctx.db.day_start, acc.get("login"), day, acc.get("balance"), acc.get("equity")) if acc.get("fresh") else {}
+        tz = rule.get("day_reset_tz", "Europe/Prague")
+        day = trading_day(now, tz)
+        login = acc.get("login")
+        hist = None
+        if acc.get("fresh") and login in deals:
+            hist = day_from_history(deals[login], cash.get(login), acc.get("balance"), day_start_ts(now, tz), now)
+        if hist:                               # exact: replaces a "first seen" start recorded after trades had closed
+            ds = await ctx.db.run(ctx.db.day_start, login, day, hist["day_start_balance"], acc.get("equity"), True)
+        else:
+            ds = await ctx.db.run(ctx.db.day_start, login, day, acc.get("balance"), acc.get("equity")) if acc.get("fresh") else {}
         # Day figures from an export that is hours or days old would describe another day: equity only.
-        m = prop_meter(acc, rule, (ds or {}).get("balance")) if acc.get("fresh") else             {"login": acc.get("login"), "equity": acc.get("equity"), "currency": acc.get("currency"), "rules": rule}
+        m = (prop_meter(acc, rule, (ds or {}).get("balance"), hist) if acc.get("fresh")
+             else {"login": login, "equity": acc.get("equity"), "currency": acc.get("currency"), "rules": rule})
         m["fresh"] = acc.get("fresh")
         m["age"] = acc.get("age")
         m["risk_to_stops"], m["risk_pct"] = acc.get("risk_to_stops"), acc.get("risk_pct")

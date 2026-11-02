@@ -244,14 +244,19 @@ class DB:
 
 
     # ------------------------------------------------------------ day start (prop meter)
-    def day_start(self, account: str, day: str, balance: float | None, equity: float | None) -> dict:
-        """First balance/equity seen for the account on that trading day (kept once stored)."""
+    def day_start(self, account: str, day: str, balance: float | None, equity: float | None, replace: bool = False) -> dict:
+        """First balance/equity seen for the account on that trading day (kept once stored). replace=True overwrites it
+        with a balance reconstructed from the deal history (exact, so it wins over a first sighting after trades closed)."""
         with self._lock:
             row = self._conn.execute("SELECT balance, equity, ts FROM day_start WHERE account=? AND day=?", (account, day)).fetchone()
-            if row:
+            if row and not (replace and balance is not None and row["balance"] != balance):
                 return dict(row)
             if balance is None and equity is None:
                 return {}
+            if row:
+                self._conn.execute("UPDATE day_start SET balance=? WHERE account=? AND day=?", (balance, account, day))
+                self._conn.commit()
+                return {"balance": balance, "equity": row["equity"], "ts": row["ts"]}
             self._conn.execute("INSERT INTO day_start VALUES (?,?,?,?,?)", (account, day, balance, equity, time.time()))
             self._conn.commit()
             return {"balance": balance, "equity": equity, "ts": time.time()}

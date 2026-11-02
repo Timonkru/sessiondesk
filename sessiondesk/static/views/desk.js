@@ -184,7 +184,8 @@ const RENDER = {
     clear(body, table([
       { label: "Account", render: (a) => [a.login, a.fresh === false ? h("span", { class: "warn small" }, " stale") : ""] },
       { label: "Equity", num: true, render: (a) => `${num(a.equity, 0)} ${a.currency || ""}` },
-      { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : `${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`) },
+      { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : [`${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`, a.bookings_today ? h("div", { class: "small muted", title: "tax, deposits, withdrawals, fees booked today - inside Today, not inside Closed today" }, `incl. ${num(a.bookings_today, 0)} bookings`) : null]) },
+        { label: "Closed today", num: true, cls: (a) => dir(a.closed_today), render: (a) => (a.closed_today == null ? h("span", { class: "muted", title: "needs the deal export (bridge)" }, "–") : [num(a.closed_today, 0), h("div", { class: "small muted" }, `${a.trades_today} trade${a.trades_today === 1 ? "" : "s"}`)]) },
       { label: "To daily limit", num: true, render: (a) => room(a.daily_loss_room_pct, 1) },
       { label: "To max loss", num: true, render: (a) => room(a.max_loss_room_pct, 2) },
       { label: "Risk at stops", num: true, render: (a) => (a.risk_pct == null ? "–" : pct(a.risk_pct, 2, false)) },

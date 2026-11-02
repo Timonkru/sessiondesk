@@ -24,7 +24,8 @@ export async function render(root, _params, ctx) {
       d.connected ? section("Accounts", h("div", { class: "scroll" }, table([
         { label: "Account", render: (a) => [a.login, a.fresh === false ? h("span", { class: "warn small" }, ` stale ${Math.round((a.age || 0) / 3600)} h`) : ""] },
         { label: "Equity", num: true, render: (a) => `${num(a.equity, 2)} ${a.currency || ""}` },
-        { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : `${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`) },
+        { label: "Today", num: true, cls: (a) => dir(a.day_pnl), render: (a) => (a.day_pnl == null ? "–" : [`${num(a.day_pnl, 0)} (${pct(a.day_pct, 2)})`, a.bookings_today ? h("div", { class: "small muted", title: "tax, deposits, withdrawals, fees booked today - inside Today, not inside Closed today" }, `incl. ${num(a.bookings_today, 0)} bookings`) : null]) },
+        { label: "Closed today", num: true, cls: (a) => dir(a.closed_today), render: (a) => (a.closed_today == null ? h("span", { class: "muted", title: "needs the deal export (bridge)" }, "–") : [num(a.closed_today, 0), h("div", { class: "small muted" }, `${a.trades_today} trade${a.trades_today === 1 ? "" : "s"}`)]) },
         { label: "Room to own stop", num: true, cls: (a) => (a.own_stop_room_pct != null && a.own_stop_room_pct < 0.5 ? "warn" : ""), render: (a) => (a.own_stop_room_pct == null ? "–" : pct(a.own_stop_room_pct, 2, false)) },
         { label: "Room to daily limit", num: true, cls: (a) => (a.daily_loss_room_pct != null && a.daily_loss_room_pct < 1 ? "warn" : ""), render: (a) => (a.daily_loss_room_pct == null ? "–" : pct(a.daily_loss_room_pct, 2, false)) },
         { label: "Full-risk losers left", num: true, render: (a) => (a.losers_left == null ? "–" : num(a.losers_left, 1)) },
@@ -32,7 +33,7 @@ export async function render(root, _params, ctx) {
         { label: "Risk at stops", num: true, render: (a) => (a.risk_pct == null ? "–" : pct(a.risk_pct, 2, false)) },
         { label: "Positions", num: true, render: (a) => a.positions },
         { label: "", render: (a) => (a.trade_allowed === false ? h("span", { class: "warn" }, "AutoTrading OFF") : a.risk_multiplier === 0 ? h("span", { class: "warn" }, "day locked") : "") },
-      ], d.accounts || [])), note("Limits come from Settings → Prop rules; the day start is the exporter's day-start balance or the first balance SessionDesk saw today.")) : null,
+      ], d.accounts || [])), note("Limits come from Settings → Prop rules. Today = equity vs the balance at the day boundary (reconstructed from the deal export; without one, the first balance SessionDesk saw today). Closed today = net of the positions closed since then, whenever they were opened - MetaTrader's history 'Today'.")) : null,
       flags.length ? section("Rule flags", h("ul", { class: "feed" }, flags.map((f) => h("li", null, h("span", { class: f.level === "high" ? "warn" : "muted" }, f.level === "high" ? "● " : "○ "), `${f.account}: ${f.text}`)))) : null);
     // One compact timeline: your setups and sessions plus high-impact releases, by time. The full picture
     // (all releases, earnings, forced flows) lives in the Calendar.
