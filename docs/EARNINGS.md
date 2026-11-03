@@ -122,6 +122,7 @@ removed two errors and exposed two others (2.0 % and 2.1 % on a rerun that is no
 verdict in fifty and no verdict for half of all reports; each row shows the line it came from, so check before relying on one.
 A figure that differs while the verdict agrees is often the vendor adjusting on its own (Alphabet: 2.12 reported, 2.67 Yahoo).
 
-Forward test against a consensus frozen before the reports of 2 Nov 2026 (after-hours names, Yahoo side, n = 17): 7 of 9
-verdicts agreed with Yahoo's own result, 8 were basis unclear. A single day, so a check rather than a rate.
+Forward test against a consensus frozen before the reports of 2 Nov 2026 (after-hours names, Yahoo side, n = 17): 7 of 8
+verdicts agreed with Yahoo's own result, 9 were basis unclear. A single day, and two rules were tightened after looking at
+it, so this is a check rather than a rate.
 Revenue has no free historical consensus, so its verdict could only be read forward and has no measured error rate yet.
