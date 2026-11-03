@@ -19,6 +19,9 @@ Every time says what it is:
 | historical estimate | median of the company's last eight results filings in Eastern time, with the spread |
 | session only | the free calendar's "after close" / "pre-market", because no history is loaded yet |
 
+A historical estimate is when the **filing** usually lands. A company that files its 8-K hours after the press wire shows that
+late time (AMETEK: about 11:21 ET with a spread of 09:56-14:05, call at 08:30); the spread tells you how far to trust it.
+
 Times show in Eastern time and in your local time. Yahoo's report timestamp is not used as a time when a company history
 exists: it is always a round placeholder, 25 minutes off at the median (October 2026 sample below).
 
