@@ -23,6 +23,7 @@ EVENTS = {   # key: (label, on by default)
     "level": ("Level crossings", False),
     "alert": ("Unusual moves (watchlist + index scan)", False),
     "job_failed": ("Failed jobs", True),
+    "earnings_flash": ("Earnings flash of your watchlist (reported figures against the frozen consensus; never a trade call)", False),
 }
 DEFAULTS = {"enabled": False, "service": "ntfy", "ntfy_server": "https://ntfy.sh", "telegram_chat": "",
             "events": {k: v[1] for k, v in EVENTS.items()}, "warn_minutes": [5], "quiet_from": "", "quiet_to": "",
@@ -86,6 +87,11 @@ def format_event(event: dict, cfg: dict) -> dict | None:
         a = event.get("alert") or {}
         return {"key": f"{kind}:{a.get('id')}", "kind": kind, "priority": 3, "title": a.get("title", kind),
                 "body": (a.get("body") or "")[:300]}
+    if kind == "earnings_flash" and on.get("earnings_flash"):
+        if not event.get("watchlist"):
+            return None
+        return {"key": f"earnflash:{event.get('symbol')}:{event.get('day')}", "kind": "earnings_flash", "priority": 3,
+                "title": event.get("title", "Earnings"), "body": (event.get("body") or "")[:300], "url": event.get("url")}
     if kind == "job" and on.get("job_failed"):
         j = event.get("job") or {}
         if j.get("status") != "failed":

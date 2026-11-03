@@ -405,6 +405,73 @@ def create_app(home: Path | None = None, *, start_background: bool = True, http:
         from .features import earnings_reported
         return await earnings_reported.reported(C(), max(1, min(days, 14)))
 
+    # ---- earnings desk: exact times, documents, calls, flash summaries from SEC filings (features/earnings_desk.py)
+    @app.get("/api/earnings/desk")
+    async def get_earnings_desk():
+        from .features import earnings_desk
+        return await earnings_desk.desk(C())
+
+    @app.get("/api/earnings/term/{symbol}")
+    async def get_earnings_term(symbol: str, day: str):
+        from .features import earnings_desk
+        symbol = symbol.upper()
+        if not earnings_desk.valid(symbol, day):
+            return JSONResponse({"error": "bad symbol or date"}, status_code=400)
+        return await earnings_desk.term(C(), symbol, day)
+
+    @app.get("/api/earnings/flash")
+    async def get_earnings_flash(limit: int = 100):
+        from .features import earnings_desk
+        return await earnings_desk.flash_list(C(), max(1, min(limit, 500)))
+
+    @app.post("/api/earnings/flash/{symbol}")
+    async def post_earnings_flash(symbol: str, day: str):
+        from .connectors.base import ConnectorError
+        from .features import earnings_desk
+        symbol = symbol.upper()
+        if not earnings_desk.valid(symbol, day):
+            return JSONResponse({"error": "bad symbol or date"}, status_code=400)
+        try:
+            return await earnings_desk.collect_now(C(), symbol, day)
+        except ConnectorError as e:
+            return {"error": str(e)}
+
+    @app.post("/api/earnings/flash/{symbol}/ai")
+    async def post_earnings_flash_ai(symbol: str, day: str):
+        from .connectors.base import ConnectorError
+        from .features import earnings_desk
+        symbol = symbol.upper()
+        if not earnings_desk.valid(symbol, day):
+            return JSONResponse({"error": "bad symbol or date"}, status_code=400)
+        try:
+            return await earnings_desk.ai_reading(C(), symbol, day)
+        except ConnectorError as e:
+            return {"error": str(e)}
+
+    @app.post("/api/earnings/save/{symbol}")
+    async def post_earnings_save(symbol: str, day: str, doc: str = "release", format: str = "text"):
+        from .connectors.base import ConnectorError
+        from .features import earnings_desk
+        symbol = symbol.upper()
+        if not earnings_desk.valid(symbol, day):
+            return JSONResponse({"error": "bad symbol or date"}, status_code=400)
+        try:
+            return await earnings_desk.save(C(), symbol, day, doc, format)
+        except ConnectorError as e:
+            return {"error": str(e)}
+
+    @app.get("/api/earnings/file/{symbol}")
+    async def get_earnings_file(symbol: str, day: str, name: str):
+        """Always a download: a stored filing is foreign HTML and must never render on this app's origin."""
+        import re as _re
+        from .features import earnings_desk
+        symbol = symbol.upper()
+        path = earnings_desk._folder(C(), symbol, day) / name if earnings_desk.valid(symbol, day) and _re.fullmatch(r"[A-Za-z0-9_\-]{1,40}\.(txt|html)", name) else None
+        if not path or not path.is_file():
+            return JSONResponse({"error": "no such file"}, status_code=404)
+        return Response(path.read_bytes(), media_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{symbol}_{day}_{name}"'})
+
     @app.get("/api/timeline")
     async def get_timeline(days: int = 7):
         from .features import timeline
@@ -1171,6 +1238,14 @@ def background(ctx) -> list:
         from .features import sthzone
         await sthzone.run_check(ctx)
 
+    async def earnings_prepare():
+        from .features import earnings_desk
+        await earnings_desk.prepare(ctx)
+
+    async def earnings_tick():
+        from .features import earnings_desk
+        await earnings_desk.tick(ctx)
+
     async def nowcast_check():
         from .features import nowcast
         await nowcast.run_check(ctx)
@@ -1324,6 +1399,8 @@ def background(ctx) -> list:
         every(lambda: 6 * 3600, hub_loop("onchain"), first_delay=60, name="hub on-chain"),
         every(lambda: 3 * 3600, hub_loop("proxies"), first_delay=600, name="hub company proxies"),
         every(lambda: 1800, nowcast_check, first_delay=900, name="earnings nowcast alert"),
+        every(lambda: 1800, earnings_prepare, first_delay=240, name="earnings prepare"),
+        every(lambda: 30, earnings_tick, first_delay=270, name="earnings flash"),
         every(lambda: 30, sth_check, first_delay=90, name="BTC STH zone"),
         every(lambda: 6 * 3600, company_watch, first_delay=400, name="company changes"),
         ctx.extras["calendar"].loop(),

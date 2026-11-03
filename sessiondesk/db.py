@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS obs (
 CREATE TABLE IF NOT EXISTS reports (
   id TEXT PRIMARY KEY, created REAL, account TEXT, period_from TEXT, period_to TEXT, data_sha TEXT, pdf_sha TEXT, csv_sha TEXT,
   net REAL, net_pct REAL, currency TEXT, trades INTEGER, units TEXT);
+CREATE TABLE IF NOT EXISTS earnings_consensus (
+  symbol TEXT, day TEXT, source TEXT, frozen REAL, data TEXT, PRIMARY KEY (symbol, day, source));
+CREATE TABLE IF NOT EXISTS earnings_meta (
+  symbol TEXT PRIMARY KEY, updated REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS earnings_flash (
+  symbol TEXT, day TEXT, accession TEXT, accepted REAL, seen REAL, parsed REAL, data TEXT, PRIMARY KEY (symbol, day));
+CREATE INDEX IF NOT EXISTS earnings_flash_parsed ON earnings_flash(parsed DESC);
 CREATE TABLE IF NOT EXISTS ai_usage (
   ts REAL, day TEXT, task TEXT, provider TEXT, model TEXT, tok_in INTEGER, tok_out INTEGER, cost REAL);
 """
@@ -266,6 +273,50 @@ class DB:
         return {(r["account"], r["day"]): r["balance"] for r in self._exec("SELECT account, day, balance FROM day_start") if r["balance"]}
 
     # ------------------------------------------------------------ issued performance reports (register)
+    # ------------------------------------------------------------ earnings desk
+    def consensus_put(self, symbol: str, day: str, source: str, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO earnings_consensus(symbol, day, source, frozen, data) VALUES (?,?,?,?,?)",
+                   (symbol, day, source, time.time(), json.dumps(data)))
+
+    def consensus_get(self, symbol: str, day: str) -> list[dict]:
+        rows = self._exec("SELECT source, frozen, data FROM earnings_consensus WHERE symbol=? AND day=?", (symbol, day))
+        return [{"source": r["source"], "frozen": r["frozen"], **json.loads(r["data"])} for r in rows]
+
+    def consensus_since(self, day: str) -> dict[tuple[str, str], list[dict]]:
+        out: dict[tuple[str, str], list[dict]] = {}
+        for r in self._exec("SELECT symbol, day, source, frozen, data FROM earnings_consensus WHERE day >= ?", (day,)):
+            out.setdefault((r["symbol"], r["day"]), []).append({"source": r["source"], "frozen": r["frozen"], **json.loads(r["data"])})
+        return out
+
+    def flash_since(self, day: str) -> dict[tuple[str, str], dict]:
+        return {(r["symbol"], r["day"]): self._flash_row(r) for r in self._exec("SELECT * FROM earnings_flash WHERE day >= ?", (day,))}
+
+    def earnings_meta_put(self, symbol: str, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO earnings_meta(symbol, updated, data) VALUES (?,?,?)", (symbol, time.time(), json.dumps(data)))
+
+    def earnings_meta_get(self, symbols: list[str]) -> dict[str, dict]:
+        if not symbols:
+            return {}
+        marks = ",".join("?" * len(symbols))
+        rows = self._exec(f"SELECT symbol, updated, data FROM earnings_meta WHERE symbol IN ({marks})", tuple(symbols))
+        return {r["symbol"]: {"updated": r["updated"], **json.loads(r["data"])} for r in rows}
+
+    def flash_put(self, symbol: str, day: str, accession: str, accepted, seen, parsed, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO earnings_flash(symbol, day, accession, accepted, seen, parsed, data) VALUES (?,?,?,?,?,?,?)",
+                   (symbol, day, accession, accepted, seen, parsed, json.dumps(data)))
+
+    @staticmethod
+    def _flash_row(r: dict) -> dict:
+        return {"symbol": r["symbol"], "day": r["day"], "accession": r["accession"], "accepted": r["accepted"], "seen": r["seen"], "parsed": r["parsed"],
+                **json.loads(r["data"])}
+
+    def flash_get(self, symbol: str, day: str) -> dict | None:
+        rows = self._exec("SELECT * FROM earnings_flash WHERE symbol=? AND day=?", (symbol, day))
+        return self._flash_row(rows[0]) if rows else None
+
+    def flash_list(self, limit: int = 100) -> list[dict]:
+        return [self._flash_row(r) for r in self._exec("SELECT * FROM earnings_flash ORDER BY parsed DESC LIMIT ?", (limit,))]
+
     def report_add(self, r: dict) -> None:
         keys = ("id", "created", "account", "period_from", "period_to", "data_sha", "pdf_sha", "csv_sha", "net", "net_pct", "currency",
                 "trades", "units", "taxes")

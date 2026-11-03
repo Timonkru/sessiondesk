@@ -1,5 +1,6 @@
 // Calendar: one timeline of everything scheduled (releases, earnings that matter, forced flows, your schedule),
 // plus the detailed economic calendar (live actuals, reaction history) and the full earnings list.
+import { releaseCell, callCell, termPanel, verdictTag } from "../lib/earnings.js";
 import { api, on } from "../lib/api.js";
 import { h, clear, table, section, clock, day, countdown, note, loading, errorBox, num, pct, dir, big } from "../lib/ui.js";
 
@@ -48,7 +49,7 @@ export async function render(root, _params, ctx) {
     };
     clear(body, h("div", { class: "screenfilters" }, boxes),
       ...[...byDay].map(([d, rows]) => section(new Date(d + "T12:00:00").toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }), table([
-        { label: "Time", render: (x) => (x.ts ? clock(x.ts) : h("span", { class: "muted small" }, "all day")) },
+        { label: "Time", render: (x) => (x.ts ? (x.time_kind === "historical" ? "~" : "") + clock(x.ts) : h("span", { class: "muted small" }, "all day")) },
         { label: "In", render: (x) => (!x.ts ? "" : x.ts > now ? (x.ts - now < 86400 ? countdown(x.ts - now) : "") : h("span", { class: "muted" }, "done")) },
         { label: "", render: (x) => h("span", { class: "small " + (x.kind === "release" ? (x.level === "high" ? "warn" : "") : x.kind === "setup" ? "muted" : "") }, KIND[x.kind] || x.kind) },
         { label: "", render: (x) => h("span", { class: "small" }, x.tag || "") },
@@ -125,6 +126,7 @@ export async function render(root, _params, ctx) {
   const CAPS = [["0", "Any size"], ["2e9", "≥ 2 B"], ["10e9", "≥ 10 B"], ["50e9", "≥ 50 B"], ["200e9", "≥ 200 B"]];
   const IMPORTANCE = [["low", "All"], ["medium", "Medium + high"], ["high", "High only"]];
   const RANK = { low: 0, medium: 1, high: 2 };
+  const termBox = h("div");      // the report panel of the clicked row: documents, call, consensus, flash
   let earnMode = localStorage.getItem("sd.earnMode") || "upcoming", reported = null;
   let earn = null, minCap = localStorage.getItem("sd.earnCap") || "10e9", minImp = localStorage.getItem("sd.earnImp") || "low",
     earnSort = localStorage.getItem("sd.earnSort") || "date";
@@ -132,7 +134,7 @@ export async function render(root, _params, ctx) {
     opts.map(([v, l]) => h("option", { value: v, selected: v === cur }, l)));
   const loadEarn = async () => {
     clear(body, loading());
-    [earn, reported] = await Promise.all([api("/api/earnings?days=7", { ttl: 300000 }), api("/api/earnings/reported", { ttl: 300000 })]);
+    [earn, reported] = await Promise.all([api("/api/earnings/desk", { ttl: 60000 }), api("/api/earnings/reported", { ttl: 300000 })]);
     drawEarn();
   };
   const modeBar = () => h("span", { class: "tabs inline" }, [["upcoming", "Upcoming"], ["reported", "Reported"]].map(([k, l]) =>
@@ -171,16 +173,21 @@ export async function render(root, _params, ctx) {
       h("label", null, "Market cap", pick("sd.earnCap", CAPS, minCap, (v) => { minCap = v; })),
       h("label", null, "Importance", pick("sd.earnImp", IMPORTANCE, minImp, (v) => { minImp = v; })),
       h("label", null, "Sort", pick("sd.earnSort", [["date", "By date"], ["cap", "By market cap"]], earnSort, (v) => { earnSort = v; }))),
+      earn.sec_contact === false ? note("SEC asks every client for a contact email. Add yours in Settings → Connectors → SEC EDGAR to get exact times, documents and flash summaries.", "warn") : null,
       note(`Source: ${earn.source || "none"} (US listings). Showing ${keep.length} of ${items.length} reports in the next 7 days. ` +
-        "Importance: high = your watchlist or a mega cap (≥ 200 B USD); medium = member of Dow 30, Nasdaq-100, DAX 40 or Euro Stoxx 50, or ≥ 50 B; low = the rest."),
+        "Importance: high = your watchlist or a mega cap (≥ 200 B USD); medium = member of Dow 30, Nasdaq-100, DAX 40 or Euro Stoxx 50, or ≥ 50 B; low = the rest. " + (earn.note || "")),
+      termBox,
       table([
-        { label: "Date", render: (r) => r.date }, { label: "Timing", render: (r) => r.timing },
+        { label: "Date", render: (r) => r.date }, { label: "Report time", render: (r) => releaseCell(r.release, r) },
+        { label: "Call", render: (r) => callCell(r.call) },
+        { label: "Flash", render: (r) => (r.flash ? h("span", null, verdictTag(r.flash.eps)) : "") },
         { label: "Symbol", render: (r) => h("a", { href: "#/stock/" + encodeURIComponent(r.symbol) }, r.symbol) },
         { label: "Company", render: (r) => r.name || "" },
         { label: "Importance", render: (r) => h("span", { class: "small " + (IMP[r.importance] ?? "") }, r.importance + (r.why ? " · " + r.why : "")) },
         { label: "EPS est.", num: true, render: (r) => r.eps_forecast ?? "" },
         { label: "Est.", num: true, render: (r) => r.estimates ?? "" }, { label: "Market cap", num: true, render: (r) => (r.cap ? big(r.cap) : "–") },
-      ], keep, { empty: earn.error_detail || (items.length ? "No reports match the filter." : "No earnings data.") }));
+      ], keep, { onRow: (r) => { termBox.scrollIntoView({ block: "nearest" }); termPanel(termBox, r.symbol, r.date); },
+        empty: earn.error_detail || (items.length ? "No reports match the filter." : "No earnings data.") }));
     ctx.setContext({ page: "Earnings calendar", filter: { min_market_cap_usd: cap, min_importance: minImp, sort: earnSort },
       earnings: keep.slice(0, 120).map((r) => ({ date: r.date, timing: r.timing, symbol: r.symbol, name: r.name, importance: r.importance, why: r.why, market_cap_usd: r.cap, eps_forecast: r.eps_forecast })) });
   };

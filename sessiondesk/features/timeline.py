@@ -120,6 +120,11 @@ async def timeline(ctx, days: int = 7) -> dict:
         upcoming.append({"day": day, "ts": None, "kind": "earnings", "tag": sym, "title": f"{r.get('name') or sym} reported",
                          "detail": " · ".join(x for x in (r.get("timing"), r.get("why")) if x), "link": f"#/stock/{sym}",
                          "level": "high" if sym in watch else "normal", "result": earnings_result(r)})
+    try:
+        from .earnings_desk import annotate_timeline
+        await annotate_timeline(ctx, upcoming)
+    except Exception as e:  # noqa: BLE001 - the timeline still shows the day
+        errors["earnings times"] = str(e)
     items += upcoming
 
     for f in flows.events_between(today, end):

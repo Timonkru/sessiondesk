@@ -2,6 +2,7 @@
 // chart, facts, source and CSV beside the list, the early warnings (a series moving unusually against its own past),
 // and a comparison of up to six series on one chart. The grouping comes from the server (datahub.layout).
 import { api, on } from "../lib/api.js";
+import { flashPage } from "../lib/earnings.js";
 import { lineChart, multiChart } from "../lib/chart.js";
 import { h, clear, table, tableCsv, section, num, dir, sparkline, stamp, note, loading, errorBox, ago, toast } from "../lib/ui.js";
 
@@ -41,7 +42,7 @@ function transform(values, mode) {
 }
 
 export async function render(root, params, ctx) {
-  const tabsBox = h("div", { class: "tabs" }), warnBox = h("div"), compareBox = h("div"), listBox = h("div", { class: "hublist" }, loading("Loading all series…")), detail = h("div", { class: "hubdetail" });
+  const flashBox = h("div", { style: { display: "none" } }), tabsBox = h("div", { class: "tabs" }), warnBox = h("div"), compareBox = h("div"), listBox = h("div", { class: "hublist" }, loading("Loading all series…")), detail = h("div", { class: "hubdetail" });
   let picked = [];
   try { picked = JSON.parse(localStorage.getItem("sd.hubCompare") || "[]").slice(0, MAX_COMPARE); } catch { picked = []; }
   let cmpRange = "3y", cmpMode = "rebased", group = localStorage.getItem("sd.hubGroup") || "", current = null, showAllWarn = false;
@@ -50,9 +51,13 @@ export async function render(root, params, ctx) {
     h("button", { class: "linkish", onclick: async (e) => { e.target.textContent = "collecting…"; const r = await api("/api/hub/collect", { method: "POST" });
       e.target.textContent = "collect now"; toast("Data hub", r.error || `${Object.values(r.collected || {}).reduce((a, b) => a + b, 0)} series updated, ${r.warnings} unusual`); load(); } }, "collect now")),
     h("div", { class: "toolbar" }, tabsBox, h("span", { style: { flex: "1" } }), filter), warnBox, compareBox,
-    h("div", { class: "hubgrid" }, listBox, detail));
+    h("div", { class: "hubgrid" }, listBox, detail), flashBox);
 
-  let data = null, byId = new Map();
+  let data = null, byId = new Map(), flashOn = false;
+  // the Earnings flash tab holds summaries, not series: it takes the place of warnings, comparison and list
+  const seriesParts = () => [warnBox, compareBox, root.querySelector(".hubgrid")];
+  const showSeries = () => { flashOn = false; seriesParts().forEach((el) => { if (el) el.style.display = ""; }); flashBox.style.display = "none"; };
+  const showFlash = (focus) => { flashOn = true; seriesParts().forEach((el) => { if (el) el.style.display = "none"; }); flashBox.style.display = ""; drawTabs(); flashPage(flashBox, focus); };
   const fmtChange = (s, v) => (v == null ? "–" : s.kind === "price" ? `${v > 0 ? "+" : ""}${num(v, 2)}%` : s.kind === "count" ? num(v, 0) : `${v > 0 ? "+" : ""}${num(v, Math.abs(v) < 1 ? 3 : 2)}`);
   const groupOf = (id) => (byId.get(id) || {}).group;
 
@@ -139,9 +144,9 @@ export async function render(root, params, ctx) {
   };
   const drawTabs = () => {
     const wg = warnGroups();
-    clear(tabsBox, data.groups.map((g) => h("button", { class: g.key === group && !filter.value.trim() ? "on" : "", onclick: () => {
+    clear(tabsBox, h("button", { class: flashOn ? "on" : "", onclick: () => showFlash() }, "Earnings flash"), data.groups.map((g) => h("button", { class: !flashOn && g.key === group && !filter.value.trim() ? "on" : "", onclick: () => {
       group = g.key; filter.value = ""; try { localStorage.setItem("sd.hubGroup", group); } catch { /* storage blocked */ }
-      drawTabs(); drawList(); const first = g.categories[0].ids[0]; if (first) open(first, { switchGroup: false });
+      showSeries(); drawTabs(); drawList(); const first = g.categories[0].ids[0]; if (first) open(first, { switchGroup: false });
     } }, g.label, " ", h("span", { class: "muted small" }, String(g.categories.reduce((a, c) => a + c.ids.length, 0))),
       wg[g.key] ? h("span", { class: "hubwarn", title: `${wg[g.key]} unusual in the last 3 days` }, String(wg[g.key])) : null)));
   };
@@ -206,7 +211,9 @@ export async function render(root, params, ctx) {
   filter.addEventListener("input", () => { drawTabs(); drawList(); });
   await load();
   drawCompare();
-  const start = params[0] ? decodeURIComponent(params[0]) : (((data.groups || []).find((g) => g.key === group) || {}).categories || [{ ids: [] }])[0].ids[0];
+  const wanted = params[0] ? decodeURIComponent(params[0]) : "";
+  if (wanted.startsWith("earnings:") || wanted === "earnings") showFlash(wanted.split(":")[1]);
+  const start = wanted && !wanted.startsWith("earnings") ? wanted : (((data.groups || []).find((g) => g.key === group) || {}).categories || [{ ids: [] }])[0].ids[0];
   if (start) open(start);
   const off = on("hub_warning", load);
   return () => off();

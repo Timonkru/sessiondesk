@@ -10,10 +10,12 @@
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime as dt
 import io
 import json
+import time
 import urllib.parse
 
 from .base import Connector, ConnectorError, Field, stable_id
@@ -312,9 +314,28 @@ class Sec(Connector):
     def _ua(self) -> dict:
         return {"User-Agent": f"SessionDesk/0.1 {self.option('contact_email')}"}
 
+    def has_contact(self) -> bool:
+        return bool(self.option("contact_email"))
+
+    async def _get(self, url: str, timeout: float = 20):
+        """Every SEC request goes through here: at most SEC_RATE per second across all callers (SEC's fair-access limit is
+        10), and a 429 stops all SEC traffic for ten minutes, because SEC blocks clients that keep going."""
+        state = self.ctx.extras.setdefault("sec_limit", {"lock": asyncio.Lock(), "last": 0.0, "blocked": 0.0})
+        if time.time() < state["blocked"]:
+            raise ConnectorError("SEC asked to slow down, pausing for a few minutes")
+        async with state["lock"]:
+            wait = 1 / SEC_RATE - (time.monotonic() - state["last"])
+            if wait > 0:
+                await asyncio.sleep(wait)
+            state["last"] = time.monotonic()
+        resp = await self.ctx.http.get(url, headers=self._ua(), timeout=timeout)
+        if resp.status_code == 429:
+            state["blocked"] = time.time() + 600
+        return resp
+
     async def _cik_map(self) -> dict:
         async def build():
-            resp = await self.ctx.http.get("https://www.sec.gov/files/company_tickers.json", headers=self._ua(), timeout=20)
+            resp = await self._get("https://www.sec.gov/files/company_tickers.json")
             if resp.status_code != 200:
                 raise ConnectorError(f"SEC HTTP {resp.status_code}")
             return {"map": {v["ticker"].upper(): int(v["cik_str"]) for v in resp.json().values()}}
@@ -327,7 +348,7 @@ class Sec(Connector):
         cik = (await self._cik_map()).get(symbol.upper().replace(".", "-"))
         if not cik:
             return []
-        resp = await self.ctx.http.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=self._ua(), timeout=20)
+        resp = await self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
         if resp.status_code != 200:
             raise ConnectorError(f"SEC HTTP {resp.status_code}")
         return parse_sec_submissions(resp.json(), cik, limit)
@@ -340,7 +361,7 @@ class Sec(Connector):
         cik = await self.cik(symbol)
         if not cik:
             return {}
-        resp = await self.ctx.http.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", headers=self._ua(), timeout=60)
+        resp = await self._get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json", 60)
         if resp.status_code == 404:
             return {}
         if resp.status_code != 200:
@@ -352,7 +373,7 @@ class Sec(Connector):
         cik = await self.cik(symbol)
         if not cik:
             return []
-        resp = await self.ctx.http.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", headers=self._ua(), timeout=20)
+        resp = await self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
         if resp.status_code != 200:
             raise ConnectorError(f"SEC HTTP {resp.status_code}")
         return parse_form4_list(resp.json(), cik, limit)
@@ -361,10 +382,43 @@ class Sec(Connector):
         """The Archives host answers 403 unless the User-Agent carries a contact email (checked 2026-10-31)."""
         if not self.option("contact_email"):
             raise ConnectorError("SEC contact email needed (Settings → Connectors → SEC EDGAR)")
-        resp = await self.ctx.http.get(url, headers=self._ua(), timeout=20)
+        resp = await self._get(url)
         if resp.status_code != 200:
             raise ConnectorError(f"SEC HTTP {resp.status_code}")
         return resp.text
+
+    async def submissions(self, symbol: str) -> tuple[int | None, dict]:
+        """The company's filing list with acceptance times; (None, {}) when SEC does not know the ticker."""
+        cik = await self.cik(symbol)
+        if not cik:
+            return None, {}
+        resp = await self._get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return cik, resp.json()
+
+    async def filing_documents(self, cik: int, accession: str) -> list[dict]:
+        acc = accession.replace("-", "")
+        resp = await self._get(f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{accession}-index.htm")
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return parse_filing_index(resp.text)
+
+    async def document(self, url: str) -> bytes:
+        if not url.startswith("https://www.sec.gov/Archives/"):
+            raise ConnectorError("not a SEC archive address")
+        resp = await self._get(url, 40)
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return resp.content
+
+    async def current_filings(self, form: str = "8-K", count: int = 100) -> list[dict]:
+        """EDGAR's current-filings feed: one request covers every company, so polling it stays cheap."""
+        resp = await self._get("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&company=&dateb=&owner=include"
+                               f"&type={form}&count={count}&output=atom")
+        if resp.status_code != 200:
+            raise ConnectorError(f"SEC HTTP {resp.status_code}")
+        return parse_current_feed(resp.text)
 
     async def test(self) -> dict:
         rows = await self.filings("AAPL", 3)
@@ -417,6 +471,75 @@ def parse_form4(xml: str) -> dict:
     return out
 
 
+def _sec_ts(text: str) -> float | None:
+    try:
+        return dt.datetime.fromisoformat((text or "").replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def parse_earnings_filings(data: dict, cik: int) -> dict:
+    """From a submissions payload (pure, tested): the 8-Ks with Item 2.02 (results), the 10-Q/10-K reports, the 6-K/20-F
+    of a foreign filer, each with SEC's acceptance time. SEC writes that time in UTC ('...Z'); checked against the
+    index pages, where the same filing reads in Eastern time (LRCX 2026-10-21: 20:13:03Z = 16:13:03 ET)."""
+    recent = (data.get("filings") or {}).get("recent") or {}
+    results, periodic, foreign = [], [], []
+    forms = recent.get("form") or []
+
+    def col(name, i):
+        vals = recent.get(name) or []
+        return vals[i] if i < len(vals) else ""
+    for i, form in enumerate(forms):
+        acc = col("accessionNumber", i)
+        doc = col("primaryDocument", i)
+        row = {"form": form, "accession": acc, "filed": col("filingDate", i), "period": col("reportDate", i), "accepted": _sec_ts(col("acceptanceDateTime", i)),
+               "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}" if doc else None}
+        if form in ("8-K", "8-K/A") and "2.02" in (col("items", i) or ""):
+            results.append(row)
+        elif form in ("10-Q", "10-K", "10-Q/A", "10-K/A"):
+            periodic.append(row)
+        elif form in ("6-K", "20-F", "40-F"):
+            foreign.append(row)
+    return {"results": results, "periodic": periodic, "foreign": foreign, "investor_site": data.get("investorWebsite") or data.get("website") or None,
+            "name": data.get("name")}
+
+
+def parse_filing_index(html: str) -> list[dict]:
+    """Document table of a filing's index page (pure, tested): [{type, description, url}]; the inline-XBRL viewer prefix is
+    removed, so every url is a plain archive address."""
+    from bs4 import BeautifulSoup
+    out = []
+    for tr in BeautifulSoup(html or "", "html.parser").find_all("tr"):
+        cells = tr.find_all("td")
+        link = tr.find("a")
+        if len(cells) < 4 or not link or not link.get("href"):
+            continue
+        href = link["href"].replace("/ix?doc=", "")
+        if not href.startswith("/Archives/"):
+            continue
+        out.append({"type": cells[3].get_text(" ", strip=True), "description": cells[1].get_text(" ", strip=True), "url": "https://www.sec.gov" + href})
+    return out
+
+
+def parse_current_feed(xml: str) -> list[dict]:
+    """EDGAR's current-filings Atom feed (pure, tested): the 'updated' stamp of an entry is the acceptance time."""
+    import html as html_mod
+    import re
+    out = []
+    for e in re.findall(r"<entry>(.*?)</entry>", xml or "", flags=re.S):
+        title = re.search(r"<title>(.*?)</title>", e, flags=re.S)
+        acc = re.search(r"accession-number=([\d-]+)", e)
+        cik = re.search(r"\((\d{10})\)", title.group(1)) if title else None
+        form = re.search(r'term="([^"]+)"', e)
+        upd = re.search(r"<updated>(.*?)</updated>", e)
+        if not (acc and cik):
+            continue
+        out.append({"accession": acc.group(1), "cik": int(cik.group(1)), "name": html_mod.unescape(title.group(1)), "form": form.group(1) if form else "",
+                    "items": re.findall(r"Item (\d\.\d\d)", e), "accepted": _sec_ts(upd.group(1)) if upd else None})
+    return out
+
+
+SEC_RATE = 8     # requests per second, under SEC's limit of 10
 SEC_FORMS = {"8-K": "material event", "10-Q": "quarterly report", "10-K": "annual report", "4": "insider transaction",
              "S-1": "registration", "DEF 14A": "proxy", "SC 13D": "5%+ stake (activist)", "SC 13G": "5%+ stake (passive)",
              "6-K": "foreign issuer report", "20-F": "foreign annual report", "13F-HR": "institutional holdings"}
@@ -454,8 +577,14 @@ class NasdaqEarnings(Connector):
             raise ConnectorError(f"Nasdaq HTTP {resp.status_code}")
         return parse_nasdaq_earnings(resp.json(), day)
 
+    async def surprise_history(self, symbol: str) -> list[dict]:
+        resp = await self.ctx.http.get(f"https://api.nasdaq.com/api/company/{symbol}/earnings-surprise",
+                                       headers={"User-Agent": "Mozilla/5.0 SessionDesk", "Accept": "application/json"}, timeout=12)
+        if resp.status_code != 200:
+            raise ConnectorError(f"Nasdaq HTTP {resp.status_code}")
+        return parse_nasdaq_surprise(resp.json())
+
     async def earnings(self, start: dt.date, days: int = 7) -> list[dict]:
-        import asyncio
         dates = [start + dt.timedelta(days=i) for i in range(days)]
         dates = [d for d in dates if d.weekday() < 5]
         res = await asyncio.gather(*(self.earnings_day(d) for d in dates), return_exceptions=True)
@@ -470,6 +599,19 @@ class NasdaqEarnings(Connector):
         return {"ok": True, "detail": f"{len(rows)} reports in the next 5 days"}
 
 
+def parse_nasdaq_surprise(payload: dict) -> list[dict]:
+    """Nasdaq's last four quarters: reported EPS on its own basis, with the report date (pure, tested)."""
+    rows = (((payload or {}).get("data") or {}).get("earningsSurpriseTable") or {}).get("rows") or []
+    out = []
+    for r in rows:
+        try:
+            month, day, year = str(r.get("dateReported")).split("/")
+            out.append({"date": dt.date(int(year), int(month), int(day)).isoformat(), "eps": float(r["eps"]), "quarter": r.get("fiscalQtrEnd")})
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out
+
+
 def parse_nasdaq_earnings(payload: dict, day: dt.date) -> list[dict]:
     rows = ((payload or {}).get("data") or {}).get("rows") or []
     timing = {"time-pre-market": "pre-market", "time-after-hours": "after close", "time-not-supplied": "n/a"}
@@ -481,7 +623,7 @@ def parse_nasdaq_earnings(payload: dict, day: dt.date) -> list[dict]:
         out.append({"symbol": sym, "name": r.get("name", ""), "date": day.isoformat(),
                     "timing": timing.get(r.get("time"), r.get("time") or "n/a"),
                     "eps_forecast": r.get("epsForecast") or None, "estimates": r.get("noOfEsts") or None,
-                    "market_cap": r.get("marketCap") or None, "last_year_eps": r.get("lastYearEPS") or None,
+                    "market_cap": r.get("marketCap") or None, "last_year_eps": r.get("lastYearEPS") or None, "quarter": r.get("fiscalQuarterEnding") or None,
                     "eps_actual": nasdaq_actual(r)})
     return out
 

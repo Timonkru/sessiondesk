@@ -99,3 +99,14 @@ Bloomberg Second Measure (card spend) would each need their own adapter; none is
   FEDS Notes, Damodaran Online, arXiv q-fin, ECB Blog.
 
 Replace any list in **Settings → Feeds** (one `Name | URL` per line; empty box = built-in list).
+
+## SEC EDGAR for the earnings desk
+
+`Sec` (connectors/public.py) adds `submissions`, `filing_documents`, `document` and `current_filings`. All SEC requests share
+one getter: at most 8 per second across callers (SEC's limit is 10), and a 429 stops all SEC traffic for ten minutes.
+`document` only fetches `https://www.sec.gov/Archives/`. The contact email goes into the User-Agent as SEC asks. Verified
+live on 2026-11-03. See [EARNINGS.md](EARNINGS.md).
+
+Nasdaq `api/company/<SYMBOL>/earnings-surprise` is an unofficial endpoint: reported EPS of the last four quarters, used as
+the basis check. Yahoo `earningsCallTimestampStart` and `isEarningsDateEstimate` come from the same unofficial source as the
+profile data; the call time matched the press release for the three companies compared so far (AAPL, VRTX, ON, 2 Nov 2026).

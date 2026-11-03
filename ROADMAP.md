@@ -13,6 +13,7 @@ Earnings nowcast. Open items in priority order.
       consensus history, revenue beat rates and a calendar with actual values - the biggest single step.
 - [ ] SEC EDGAR: enter the contact email (Settings → Connectors). Without it the Form 4 insider series stay empty
       (the Archives host answers 403).
+- [ ] Earnings desk: first AI reading with a real key; watch a full reporting day on the maintainer's own instance.
 - [ ] First real AI call per provider (OpenAI, Gemini, OpenRouter, Ollama); Anthropic is verified.
 - [ ] Earnings nowcast on the maintainer's own instance (so far only on a scratch instance).
 - [ ] Watch one high-impact release live end to end (warning toasts, burst mode, release bar).

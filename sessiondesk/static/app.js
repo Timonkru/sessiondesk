@@ -285,6 +285,9 @@ function wirePush() {
     toast(alert.title, alert.body, { kind: "high", onClick: () => ctx.go(target) });
     notify(alert.title, alert.body);
   });
+  on("earnings_flash", ({ symbol, title, body }) => {
+    toast(title, body, { onClick: () => ctx.go("#/hub/earnings:" + encodeURIComponent(symbol)) });
+  });
   on("price_alert", ({ alert }) => {
     const src = (alert.data || {}).source || "quote";
     toast("Alert: " + alert.title, alert.body, { kind: "high", onClick: () => ctx.go(["quote", "stock"].includes(src) ? "#/stock/" + encodeURIComponent(alert.symbol) : "#/alerts") });

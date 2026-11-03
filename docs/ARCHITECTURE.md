@@ -9,6 +9,7 @@ sessiondesk/app.py  FastAPI: routes, security guard, background loops
    +-- features/   one module per page: turns connector data into what the page shows
    |     markets  stocks  deep  valuation  movers  news  calendar  flows  research  macro  broker  jobs
    |     today  levels  risk  journal  indices  assets  universe  feeds  system  proxies  nowcast
+   |     earnings_desk  earnings_parse (times, documents, calls, flash from SEC filings: EARNINGS.md)
    +-- connectors/ one class per outside system, normalized shapes (see base.py)
    |     yahoo  rss  public (fred, treasury, cnbc, ffcal, cftc, sec, nasdaq)  mt5  keyed (finnhub, fmp, polygon,
    |     alphavantage, tradingeconomics, alpaca, agsi, quiver)  registry.py (the list + planned entries)
