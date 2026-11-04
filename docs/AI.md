@@ -17,7 +17,7 @@ prompt requires it to
 | ask | search bar on any page, "Ask AI" | the current page's data |
 | explain | "explain with AI" on an alert, optional auto-explain | the computed move facts (beta split, earnings, headlines) |
 | summarize | research reader | the article text |
-| briefing | Today, "Pre-session briefing" | markets with observation times; local schedule and event proximity; account freshness and held markets; volatility, risk ratios, rates, credit and implied Fed path; earnings, computed levels, flow mechanisms, scanner anomalies, data-hub warnings and selected archived news |
+| briefing | Today, "Pre-session briefing" | markets with observation times; local schedule and event proximity; account freshness and held markets; volatility, options (put/call, 30-day implied volatility), risk ratios, rates, credit and implied Fed path; upcoming and just reported earnings, computed levels, flow mechanisms, scanner anomalies, data-hub warnings and selected archived news |
 | review | Today, "Weekly review" | computed account/setup/market statistics for rolling 7 days, the preceding nonoverlapping 23 days and their 30-day total; risk coverage, selected examples/notes and a separate current risk snapshot |
 | support | Help page, Settings | README, docs and the connector status (never keys) |
 
@@ -37,6 +37,15 @@ The archive is selected by impact, relevance and recency, with duplicate titles 
 complete news wire. Quote timestamps, slower macro dates, stale accounts and unavailable sources
 remain visible to the model. Optional sources have separate timeouts so one failure does not discard
 the other evidence. File paths, API keys and position tickets are excluded from briefing context.
+
+Reports since the prior US session arrive in two forms that can differ: the vendor's own actual and estimate with the
+stock's reaction, and the flash read from the SEC filing (docs/EARNINGS.md), whose hit or miss exists only on a confirmed
+basis against a consensus frozen beforehand. The model must not derive a verdict where there is none. Reactions stay empty until
+the session that digested the report has closed.
+
+Options evidence is what SessionDesk already collects: put/call of SPY and QQQ, and the stored 30-day implied volatility
+per underlying. A percentile is given only from 60 days of history; before that the model may not call a volatility high or low.
+Single-stock implied moves and skew are on the stock's Options tab, not in the briefing.
 
 The target is 650-950 words. The briefing has a larger output allowance than a short alert explanation
 so reasoning and the final sections have room to finish; actual token use remains visible in Settings.

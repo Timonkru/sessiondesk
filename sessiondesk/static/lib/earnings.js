@@ -72,6 +72,7 @@ function figureList(figs, fmt) {
 
 export function latencyText(f) {
   if (f.late || !f.latency) return "read on request, so no latency";
+  if (f.latency.total > 3600) return `read ${Math.round(f.latency.total / 60)} min after SEC: the app was not running or missed it`;
   const l = f.latency, s = (x) => (x == null ? "?" : `${Math.round(x)} s`);
   return `SEC acceptance to display ${s(l.total)} (SEC to seen ${s(l.sec_to_seen)}, read ${s(l.seen_to_shown)})`;
 }
@@ -165,7 +166,7 @@ export async function flashPage(box, focus) {
       { label: "EPS", render: (r) => verdictTag(r.result.eps.verdict) },
       { label: "Revenue", render: (r) => verdictTag(r.result.revenue.verdict) },
       { label: "Guidance", render: (r) => h("span", { class: "small muted" }, (r.guidance || {}).found ? (r.guidance.direction || "stated") : "–") },
-      { label: "Latency", render: (r) => h("span", { class: "small muted" }, r.late || !r.latency ? "on request" : `${Math.round(r.latency.total)} s`) },
+      { label: "Latency", render: (r) => h("span", { class: "small muted" }, r.late || !r.latency ? "on request" : r.latency.total > 3600 ? "app was off" : `${Math.round(r.latency.total)} s`) },
     ], d.items, { onRow: open, empty: "No flash yet. They appear here while reports come in (upcoming reports: Calendar → Earnings)." }),
     detail);
   const first = d.items.find((r) => r.symbol === focus) || (focus ? null : d.items[0]);

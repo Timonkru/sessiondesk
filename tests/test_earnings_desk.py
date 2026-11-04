@@ -436,3 +436,9 @@ def test_labels_for_timeline_come_from_stored_data_only(client):
     asyncio.run(desk.annotate_timeline(ctx, items))
     assert items[0]["time_kind"] == "historical" and items[0]["ts"] and items[1]["ts"] is None
     assert not calls_before
+
+
+def test_a_filing_read_long_after_acceptance_is_not_a_flash():
+    assert desk.catching_up(1000.0, 1000.0 + desk.CATCH_UP_SECONDS) is False
+    assert desk.catching_up(1000.0, 1001.0 + desk.CATCH_UP_SECONDS) is True
+    assert desk.catching_up(None, 1e9) is False

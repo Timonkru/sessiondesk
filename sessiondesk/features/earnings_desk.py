@@ -36,6 +36,7 @@ FALLBACK_HOT = 300
 FALLBACK_LATE = 1800
 FREEZE_DAYS = 2
 MAX_TERMS_PER_DAY = 80
+CATCH_UP_SECONDS = 3600    # read this long after SEC accepted it: the app was off or missed it, so old news, not a flash
 META_MAX_AGE = 20 * 3600
 SYMBOL_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -390,6 +391,11 @@ async def freeze(ctx, term: dict) -> bool:
     return True
 
 
+def catching_up(accepted: float | None, at: float) -> bool:
+    """True for a filing read long after SEC accepted it (pure, tested)."""
+    return accepted is not None and at - accepted > CATCH_UP_SECONDS
+
+
 async def collect_flash(ctx, term: dict, filing: dict, cik: int, *, seen: float | None = None, late: bool = False) -> dict:
     """Read one results filing into a flash. Store first, then tell the user."""
     sym, day = term["symbol"], term["date"]
@@ -410,7 +416,7 @@ async def collect_flash(ctx, term: dict, filing: dict, cik: int, *, seen: float 
             "latency": None if late else {"sec_to_seen": seen - filing["accepted"] if filing.get("accepted") else None, "seen_to_shown": parsed_at - seen,
                                           "total": parsed_at - filing["accepted"] if filing.get("accepted") else None}}
     await ctx.db.run(ctx.db.flash_put, sym, day, filing["accession"], filing.get("accepted"), seen, parsed_at, data)
-    if not late:
+    if not late and not catching_up(filing.get("accepted"), parsed_at):
         title, body = headline(sym, data)
         ctx.broker.publish("earnings_flash", {"symbol": sym, "day": day, "title": title, "body": body, "watchlist": bool(term.get("watchlist")), "url": url})
     return data

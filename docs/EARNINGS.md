@@ -48,7 +48,8 @@ A collector polls EDGAR's current-filings feed every 30 seconds **only while a r
 companies, with at most eight SEC requests per second overall and a ten-minute stop on a 429. It reads Exhibit 99 by rules
 (tables, then sentences), with no AI, and shows reported figures with the line they came from, stated guidance, and the
 latency from SEC's acceptance to the display. The press wire is usually a few minutes ahead of SEC, so this is not the
-first moment a number is public.
+first moment a number is public. A filing read more than an hour after acceptance (the app was off) is stored and marked as
+such, without a toast or push.
 
 **Which reports:** your watchlist, members of the big indices and large caps. Any other report can be read on request in its
 panel; such a read is marked and claims no latency.
@@ -64,7 +65,8 @@ Shown only when all of this holds:
    REITs are often compared on FFO. So a figure counts only if its row in the release also holds a value that vendor
    published for the previous or the year-ago quarter. No such row, or rows on different bases that match: **basis unclear**.
 3. **The gap can be real.** More than 50 % from the consensus (25 % for a GAAP figure, which carries one-offs) is shown as
-   basis unclear. Under one cent counts as in line, since a consensus has more digits than a company reports.
+   basis unclear, if the EPS gap is also above 25 cents: on a small EPS a few cents are a large percentage. Under one cent
+   counts as in line, since a consensus has more digits than a company reports.
 
 Each vendor is checked separately. If they disagree the row says "sources disagree". A beat says little on its own: about
 72 % of reports beat (2016-2022, n = 1,679). The desk never turns a figure into a trade statement.
@@ -81,6 +83,12 @@ Off by default. **Settings → Push → Earnings flash** sends only your watchli
 The panel offers a second reading with your own key, on request only, and it costs what your provider charges. Each number
 must come with a word-for-word quote; a quote that is not in the release, or does not hold the number, is dropped. The
 rule-based flash needs no key. Not yet tested with a real model.
+
+### In the briefing
+
+The pre-session briefing gets these flashes for the reports since the prior US session, next to the vendor's own figures and
+the stock's reaction from the Reported list (docs/AI.md). Reports that came out while the app was off are read when it starts,
+as long as they are from today or yesterday.
 
 ## Coverage
 
@@ -105,7 +113,7 @@ foreign filers on 6-K; 4 had no results 8-K near the date.
 | Kind of link | company site 153, investor page 31, webcast or events page 33 (n 217) |
 | Call after SEC acceptance | median 104 min |
 | Webcast framing (33 links) | 15 forbid framing, 11 refused an automated request, 17 no header; hosts ask for registration |
-| Press wire vs SEC (n 32, via Google News dates) | 22 cases: wire 0.1 to 57 min ahead, typically 2-7 min. 10 cases show the wire 33-59 min after SEC, more likely Google's indexing than the wire, so this is a rough figure |
+| Press wire vs SEC (n 32, via Google News dates) | 22 cases: wire up to 57 min ahead, typically 2-7 min, one case 0.6 min behind. 10 cases show the wire 33-59 min after SEC, more likely Google's indexing than the wire, so this is a rough figure |
 
 ### Reading the figures: hit or miss against the vendor's own result
 

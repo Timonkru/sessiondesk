@@ -35,6 +35,52 @@ def test_news_keeps_relevant_normal_items_and_deduplicates(client):
     assert items[0]["relevant_to"] == ["DAX"] and items[0]["summary"] == "Survey details"
 
 
+FLASH = {"name": "Lam", "timing": "after close", "quarter": "Sep 2026", "consensus_frozen": True, "guidance": {"direction": "raised", "quotes": ["a", "b", "c"]}, "call": {"ts": 1793000000},
+         "result": {"eps": {"verdict": "beat", "figures": [], "rows": [{"source": "yahoo", "actual": 2.2, "consensus": 2.0, "verdict": "beat", "basis": "adjusted", "label": "Non-GAAP EPS", "quote": "long"}]},
+                    "revenue": {"verdict": "basis unclear", "figures": [{"value": 5e9, "basis": None, "label": "Revenue", "quote": "long"}],
+                                "rows": [{"source": "yahoo", "actual": None, "consensus": 4.8e9, "verdict": "basis unclear", "why": "no match"}]}}}
+
+
+def _no_network_options(monkeypatch):
+    async def putcall(_):
+        return {"rows": [{"symbol": "SPY", "pc_volume": 1.2, "pc_oi": 1.5, "expiries": ["x"]}], "asof": 1793000000}
+
+    async def reported(_):
+        return {"items": [], "asof": 1793000000}
+    monkeypatch.setattr(briefing.indices, "putcall", putcall)
+    monkeypatch.setattr(briefing.earnings_reported, "reported", reported)
+
+
+def test_flash_view_keeps_verdicts_only_with_a_confirmed_basis():
+    v = briefing.flash_view({**FLASH, "accepted": 1793000000})
+    assert v["eps"]["verdict"] == "beat" and v["eps"]["compared"][0]["consensus_source"] == "yahoo" and "in_release" not in v["eps"]
+    assert v["revenue"]["verdict"] == "basis unclear" and v["revenue"]["compared"] == [] and v["revenue"]["why"] == "no match"
+    assert v["revenue"]["in_release"] == [{"value": 5e9, "basis": None, "label": "Revenue"}]
+    assert v["guidance"] == {"direction": "raised", "quote": "a"}
+
+
+def test_merge_reported_combines_sources_and_names_what_is_missing():
+    vendor = [{"symbol": "AAA", "date": "2026-11-03", "timing": "before open", "importance": "medium", "cap": 5, "actual": 1.0, "estimate": 0.9, "surprise_pct": 11.1, "source": "Nasdaq", "move": 2.0, "market": 0.5, "excess": 1.5},
+              {"symbol": "OLD", "date": "2026-10-30", "importance": "high", "cap": 9, "actual": 1.0, "estimate": 0.9},
+              {"symbol": "BBB", "date": "2026-11-03", "timing": "after close", "importance": "high", "cap": 9, "actual": 3.0, "estimate": 3.1, "source": "Yahoo", "move": None}]
+    m = briefing.merge_reported(vendor, {("BBB", "2026-11-03"): FLASH, ("CCC", "2026-11-03"): FLASH, ("OLD", "2026-10-30"): FLASH},
+                                [{"symbol": "AAA", "date": "2026-11-03"}, {"symbol": "DDD", "date": "2026-11-03"}, {"symbol": "EEE", "date": "2026-10-30"}], "2026-11-03")
+    assert [r["symbol"] for r in m["items"]] == ["BBB", "AAA", "CCC"]
+    assert m["items"][0]["reaction"] is None and m["items"][0]["sec_filing"]["eps"]["verdict"] == "beat"
+    assert m["items"][1]["reaction"]["vs_sp500_pct"] == 1.5 and "sec_filing" not in m["items"][1]
+    assert m["items"][2]["vendor_eps"] is None
+    assert m["no_result_yet"] == ["DDD"]
+    assert all("cap" not in r for r in m["items"])
+
+
+def test_iv_row_gives_no_percentile_on_a_short_history():
+    assert briefing.iv_row("SPY", []) is None
+    assert briefing.iv_row("SPY", [("2026-11-03", 15.0)])["change_pts"] is None
+    short = [(f"d{i}", 10.0 + i) for i in range(briefing.IV_RANK_MIN - 1)]
+    assert briefing.iv_row("SPY", short)["percentile"] is None
+    assert briefing.iv_row("SPY", short + [("z", 5.0)])["percentile"] == 2
+
+
 def test_briefing_context_preserves_late_sections_and_headline_depth():
     facts = {"news": {"items": [{"title": str(i)} for i in range(60)]}, "credit": {"spread": 0}, "accounts": [{"fresh": False}]}
     d = json.loads(assist.briefing_context_json(facts))
@@ -71,7 +117,16 @@ def test_briefing_facts_include_richer_evidence_and_survive_optional_failure(cli
     monkeypatch.setattr(today, "snapshot", snap)
     monkeypatch.setattr(briefing.macro, "rates", failed)
     monkeypatch.setattr(briefing.levels, "snapshot", level_data)
+    _no_network_options(monkeypatch)
+    ctx.db.upsert_series({"id": "iv:SPY", "name": "SPY IV", "category": "Implied volatility", "source": "test", "kind": "rate"}, [("2026-10-22", 15.0), ("2026-10-23", 16.5)])
+    ctx.db.flash_put("LRCX", "2026-10-23", "acc", now - 3600, now - 3590, now - 3589, FLASH)
     facts = client.portal.call(today.briefing_facts, ctx)
+    assert facts["missing_sources"].get("options") is None and facts["missing_sources"].get("earnings_reported") is None
+    assert facts["options"]["iv_30d"] == [{"symbol": "SPY", "iv30_pct": 16.5, "day": "2026-10-23", "change_pts": 1.5, "days_of_history": 2,
+                                           "low": 15.0, "high": 16.5, "percentile": None}]
+    assert facts["options"]["put_call"]["rows"][0]["pc_volume"] == 1.2
+    assert [r["symbol"] for r in facts["earnings_reported"]["items"]] == ["LRCX"]
+    assert facts["earnings_reported"]["vendor_list_unavailable"] is True
     assert facts["missing_sources"]["rates"] == "RuntimeError"
     assert facts["markets"][0]["rows"][0]["observed_utc"] == "2026-10-26T07:37+00:00"
     assert facts["market_data_status"]["stale"] is True
